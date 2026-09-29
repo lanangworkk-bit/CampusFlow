@@ -52,12 +52,25 @@ def create_task():
 def update_task(task_id):
     data = request.get_json()
     db = get_db()
+
+    existing = db.execute('SELECT * FROM tasks WHERE id = ?', (task_id,)).fetchone()
+    if existing is None:
+        return jsonify({'error': 'Task not found'}), 404
+
+    title = data.get('title', existing['title'])
+    description = data.get('description', existing['description'])
+    deadline = data.get('deadline', existing['deadline'])
+    priority = data.get('priority', existing['priority'])
+    status = data.get('status', existing['status'])
+
     db.execute(
         'UPDATE tasks SET title = ?, description = ?, deadline = ?, priority = ?, status = ? WHERE id = ?',
-        (data['title'], data.get('description'), data.get('deadline'), data.get('priority'), data.get('status'), task_id)
+        (title, description, deadline, priority, status, task_id)
     )
     db.commit()
-    return jsonify({'message': 'Task updated successfully'})
+
+    task = db.execute('SELECT * FROM tasks WHERE id = ?', (task_id,)).fetchone()
+    return jsonify(dict(task))
 
 @app.route('/api/tasks/<int:task_id>', methods=['DELETE'])
 def delete_task(task_id):
