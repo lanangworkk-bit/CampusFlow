@@ -108,6 +108,13 @@
                     <h2 class="font-bold">Daftar Tugas</h2>
                     <div class="flex gap-2">
                         <input type="search" id="task-search" placeholder="Cari tugas..." aria-label="Cari tugas" class="input w-40">
+                        <select id="filter-priority" aria-label="Filter prioritas" class="input w-32">
+                            <option value="all">Semua Prioritas</option>
+                            <option value="LOW">LOW</option>
+                            <option value="MEDIUM">MEDIUM</option>
+                            <option value="HIGH">HIGH</option>
+                            <option value="URGENT">URGENT</option>
+                        </select>
                         <select id="filter-status" aria-label="Filter status" class="input w-32">
                             <option value="all">Semua Status</option>
                             <option value="TODO">TODO</option>
