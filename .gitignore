@@ -1,0 +1,14 @@
+# Python
+__pycache__/
+*.py[cod]
+venv/
+.env
+
+# Database
+*.db
+
+# Log
+*.log
+
+# OS
+.DS_Store
