@@ -1,71 +1,130 @@
-// CampusFlow - JavaScript Dasar untuk V1
-// Fungsi: Interaksi sederhana untuk task management
+const API_URL = '/api/tasks';
 
-// Data sementara (akan digantikan LocalStorage di fase selanjutnya)
-const tasks = [
-    { id: 1, title: 'Programming Assignment', description: 'Tugas pemrograman mingguan', deadline: '2026-10-01', priority: 'HIGH', status: 'TODO' },
-    { id: 2, title: 'Mathematics Quiz', description: 'Quiz matematika mingguan', deadline: '2026-10-02', priority: 'MEDIUM', status: 'IN PROGRESS' },
-];
+document.addEventListener('DOMContentLoaded', function () {
+    loadTasks();
 
-// Fungsi menambah task
-function addTask(title, description, deadline, priority) {
-    const newTask = {
-        id: Date.now(),
+    const form = document.getElementById('task-form');
+    if (form) {
+        form.addEventListener('submit', handleSubmit);
+    }
+});
+
+function handleSubmit(event) {
+    event.preventDefault();
+
+    const form = event.target;
+    const titleInput = document.getElementById('task-title');
+    const errorEl = document.getElementById('form-error');
+
+    const title = titleInput.value.trim();
+
+    if (title === '') {
+        errorEl.textContent = 'Judul tugas tidak boleh kosong.';
+        return;
+    }
+
+    errorEl.textContent = '';
+
+    const payload = {
         title: title,
-        description: description,
-        deadline: deadline,
-        priority: priority || 'MEDIUM',
-        status: 'TODO'
+        description: document.getElementById('task-description').value.trim(),
+        deadline: document.getElementById('task-deadline').value,
+        priority: document.getElementById('task-priority').value
     };
-    tasks.push(newTask);
-    renderTasks();
-    showNotification('Task added successfully!');
+
+    fetch(API_URL, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
+    })
+        .then(function (response) {
+            return response.json();
+        })
+        .then(function () {
+            form.reset();
+            loadTasks();
+        })
+        .catch(function (error) {
+            console.error('Gagal menyimpan tugas:', error);
+            errorEl.textContent = 'Terjadi kesalahan. Coba lagi.';
+        });
 }
 
-// Fungsi merender task ke HTML
-function renderTasks() {
-    const tasksContainer = document.getElementById('tasks-container');
-    if (!tasksContainer) return;
-    
-    tasksContainer.innerHTML = '';
-    
-    tasks.forEach(task => {
-        const taskElement = document.createElement('div');
-        taskElement.className = 'task-item p-3 rounded-lg mb-2 bg-white shadow-sm';
-        taskElement.innerHTML = `
-            <div class="flex items-start">
-                <span class="flex-shrink-0 w-6 h-6 rounded-lg bg-${task.priority === 'HIGH' ? 'red' : task.priority === 'MEDIUM' ? 'yellow' : 'green'}-100 flex items-center justify-center mr-3">
-                    <svg class="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V5a2 2 0 012-2h2a2 2 0 012 2v14m-6 0l12 4L9 19z"></stroke-linecap></svg>
-                </span>
-                <div class="flex-1">
-                    <p class="text-sm font-medium text-gray-900">${task.title}</p>
-                    <p class="text-xs text-gray-500">${task.description}</p>
-                </div>
-                <span class="ml-2 text-xs rounded bg-${task.status === 'COMPLETED' ? 'green' : task.status === 'OVERDUE' ? 'red' : 'blue'}-100 px-2 py-0.5">${task.status}</span>
+function loadTasks() {
+    fetch(API_URL)
+        .then(function (response) {
+            return response.json();
+        })
+        .then(function (tasks) {
+            renderTasks(tasks);
+            updateStats(tasks);
+        })
+        .catch(function (error) {
+            console.error('Gagal memuat tasks:', error);
+            const container = document.getElementById('tasks-container');
+            if (container) {
+                container.innerHTML = '<p class="text-sm text-red-500">Gagal memuat data. Pastikan server berjalan.</p>';
+            }
+        });
+}
+
+function renderTasks(tasks) {
+    const container = document.getElementById('tasks-container');
+
+    if (!container) {
+        return;
+    }
+
+    container.innerHTML = '';
+
+    if (tasks.length === 0) {
+        container.innerHTML = '<p class="text-sm text-gray-500">Belum ada tugas.</p>';
+        return;
+    }
+
+    tasks.forEach(function (task) {
+        const item = document.createElement('div');
+        item.className = 'task-item flex items-start px-2 py-2 rounded hover:bg-gray-50';
+        item.innerHTML = `
+            <div class="flex-1">
+                <p class="text-sm font-medium text-gray-900">${task.title}</p>
+                <p class="text-xs text-gray-500">Due: ${task.deadline || '-'}</p>
             </div>
+            <span class="ml-2 text-xs rounded bg-${priorityColor(task.priority)}-100 px-2 py-0.5">${task.priority}</span>
         `;
-        tasksContainer.appendChild(taskElement);
+        container.appendChild(item);
     });
 }
 
-// Fungsi menampilkan notifikasi
-function showNotification(message) {
-    alert(message);
+function priorityColor(priority) {
+    if (priority === 'URGENT' || priority === 'HIGH') return 'red';
+    if (priority === 'MEDIUM') return 'yellow';
+    return 'green';
 }
 
-// Event listeners saat DOM ready
-document.addEventListener('DOMContentLoaded', () => {
-    // Inisialisasi render saat halaman dimuat
-    renderTasks();
-    
-    // Contoh: menambah task baru saat tombol diklik
-    const addTaskBtn = document.getElementById('add-task-btn');
-    if (addTaskBtn) {
-        addTaskBtn.addEventListener('click', () => {
-            const title = prompt('Masukkan judul task:');
-            if (title) {
-                addTask(title, 'Deskripsi task', '2026-10-15', 'MEDIUM');
-            }
-        });
-    }
-});
+function updateStats(tasks) {
+    const today = new Date().toISOString().split('T')[0];
+
+    const total = tasks.length;
+    const completed = tasks.filter(function (t) {
+        return t.status === 'COMPLETED';
+    }).length;
+    const pending = tasks.filter(function (t) {
+        return t.status !== 'COMPLETED';
+    }).length;
+    const overdue = tasks.filter(function (t) {
+        return t.deadline && t.deadline < today && t.status !== 'COMPLETED';
+    }).length;
+
+    const totalEl = document.getElementById('stat-total');
+    const completedEl = document.getElementById('stat-completed');
+    const pendingEl = document.getElementById('stat-pending');
+    const overdueEl = document.getElementById('stat-overdue');
+
+    if (totalEl) totalEl.textContent = total;
+    if (completedEl) completedEl.textContent = completed;
+    if (pendingEl) pendingEl.textContent = pending;
+    if (overdueEl) overdueEl.textContent = overdue;
+}
