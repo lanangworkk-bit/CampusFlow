@@ -1,14 +1,13 @@
-# Python
+# macOS
+.DS_Store
+
+# Editor
+.vscode/
+.idea/
+
+# Python (untuk branch flask-backend)
 __pycache__/
 *.py[cod]
 venv/
-.env
-
-# Database
 *.db
-
-# Log
 *.log
-
-# OS
-.DS_Store

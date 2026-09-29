@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="id" class="scroll-smooth">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="CampusFlow - One Place for Your College Life">
+    <title>CampusFlow - Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+        }
+    </script>
+    <link rel="stylesheet" href="assets/style.css">
+</head>
+<body class="min-h-screen bg-gray-50 text-gray-900 dark:bg-gray-900 dark:text-gray-100 transition-colors">
+
+    <!-- Mobile Menu Toggle -->
+    <button id="mobile-menu-btn" class="fixed top-4 left-4 z-50 md:hidden bg-white dark:bg-gray-800 p-2 rounded-lg shadow" aria-label="Buka menu">
+        <svg class="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/>
+        </svg>
+    </button>
+
+    <div class="max-w-7xl mx-auto p-4 flex gap-6 items-start">
+
+        <!-- Sidebar -->
+        <aside id="sidebar" class="sidebar w-64 shrink-0 bg-white dark:bg-gray-800 shadow rounded-lg sticky top-4 p-0 overflow-hidden">
+            <div class="p-6 border-b border-gray-200 dark:border-gray-700">
+                <h1 class="text-xl font-bold">CampusFlow</h1>
+                <p class="text-sm text-gray-500 dark:text-gray-400">One Place for Your College Life.</p>
+            </div>
+            <nav class="p-4">
+                <ul class="space-y-1" id="nav-list">
+                    <li><a href="#dashboard" class="nav-link active block px-3 py-2 rounded text-sm font-medium">Dashboard</a></li>
+                    <li><a href="#tasks" class="nav-link block px-3 py-2 rounded text-sm">Tasks</a></li>
+                    <li><a href="#courses" class="nav-link block px-3 py-2 rounded text-sm">Courses</a></li>
+                    <li><a href="#calendar" class="nav-link block px-3 py-2 rounded text-sm">Calendar</a></li>
+                    <li><a href="#notes" class="nav-link block px-3 py-2 rounded text-sm">Notes</a></li>
+                    <li><a href="#analytics" class="nav-link block px-3 py-2 rounded text-sm">Analytics</a></li>
+                    <li><a href="#settings" class="nav-link block px-3 py-2 rounded text-sm">Settings</a></li>
+                </ul>
+            </nav>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="flex-1 min-w-0 space-y-6" id="main-content">
+
+            <!-- Header -->
+            <header class="flex items-center justify-between">
+                <div>
+                    <p class="text-lg font-medium" id="greeting">Good evening, Lanang</p>
+                    <p class="text-sm text-gray-500 dark:text-gray-400" id="today-date"></p>
+                </div>
+                <button id="theme-toggle" class="p-2 rounded-lg bg-white dark:bg-gray-800 shadow hover:bg-gray-100 dark:hover:bg-gray-700" aria-label="Toggle tema">
+                    <svg class="h-5 w-5 hidden dark:block" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.36 6.36l-.7-.7M6.34 6.34l-.7-.7m12.72 0l-.7.7M6.34 17.66l-.7.7M16 12a4 4 0 11-8 0 4 4 0 018 0z"/>
+                    </svg>
+                    <svg class="h-5 w-5 dark:hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 14a9.003 9.003 0 008.354-5.646z"/>
+                    </svg>
+                </button>
+            </header>
+
+            <!-- Statistics Cards -->
+            <section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4" aria-label="Statistik">
+                <div class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm">
+                    <p class="text-xs text-gray-500 dark:text-gray-400">Total Tugas</p>
+                    <p class="text-2xl font-bold" id="stat-total">0</p>
+                </div>
+                <div class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm">
+                    <p class="text-xs text-gray-500 dark:text-gray-400">Selesai</p>
+                    <p class="text-2xl font-bold text-green-600" id="stat-completed">0</p>
+                </div>
+                <div class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm">
+                    <p class="text-xs text-gray-500 dark:text-gray-400">Pending</p>
+                    <p class="text-2xl font-bold text-yellow-600" id="stat-pending">0</p>
+                </div>
+                <div class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm">
+                    <p class="text-xs text-gray-500 dark:text-gray-400">Overdue</p>
+                    <p class="text-2xl font-bold text-red-600" id="stat-overdue">0</p>
+                </div>
+            </section>
+
+            <!-- Add Task Form -->
+            <section class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-sm">
+                <h2 class="font-bold mb-4">Tambah Tugas</h2>
+                <form id="task-form" class="grid grid-cols-1 md:grid-cols-4 gap-3">
+                    <input type="text" id="task-title" placeholder="Judul tugas" aria-label="Judul tugas" class="input">
+                    <input type="text" id="task-description" placeholder="Deskripsi" aria-label="Deskripsi" class="input">
+                    <input type="date" id="task-deadline" aria-label="Deadline" class="input">
+                    <select id="task-priority" aria-label="Prioritas" class="input">
+                        <option value="LOW">LOW</option>
+                        <option value="MEDIUM" selected>MEDIUM</option>
+                        <option value="HIGH">HIGH</option>
+                        <option value="URGENT">URGENT</option>
+                    </select>
+                    <div class="md:col-span-4 flex items-center gap-3">
+                        <button type="submit" class="btn-primary">Simpan Tugas</button>
+                        <p id="form-error" class="text-sm text-red-500" role="alert"></p>
+                    </div>
+                </form>
+            </section>
+
+            <!-- Task List with Filter -->
+            <section id="tasks" class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-sm">
+                <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+                    <h2 class="font-bold">Daftar Tugas</h2>
+                    <div class="flex gap-2">
+                        <input type="search" id="task-search" placeholder="Cari tugas..." aria-label="Cari tugas" class="input w-40">
+                        <select id="filter-status" aria-label="Filter status" class="input w-32">
+                            <option value="all">Semua Status</option>
+                            <option value="TODO">TODO</option>
+                            <option value="IN PROGRESS">IN PROGRESS</option>
+                            <option value="COMPLETED">COMPLETED</option>
+                            <option value="OVERDUE">OVERDUE</option>
+                        </select>
+                    </div>
+                </div>
+                <div id="task-list" class="space-y-3" aria-live="polite"></div>
+            </section>
+
+            <!-- Course List -->
+            <section id="courses" class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-sm">
+                <h2 class="font-bold mb-4">Mata Kuliah</h2>
+                <div id="course-list" class="grid grid-cols-1 sm:grid-cols-2 gap-3" aria-live="polite"></div>
+            </section>
+
+            <!-- Calendar -->
+            <section id="calendar" class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-sm">
+                <h2 class="font-bold mb-4">Kalender</h2>
+                <div class="flex items-center justify-between mb-4">
+                    <button id="calendar-prev" class="btn-secondary" aria-label="Bulan sebelumnya">&larr;</button>
+                    <span id="calendar-title" class="font-medium"></span>
+                    <button id="calendar-next" class="btn-secondary" aria-label="Bulan berikutnya">&rarr;</button>
+                </div>
+                <div class="grid grid-cols-7 gap-1 text-center text-xs text-gray-500 dark:text-gray-400 mb-2">
+                    <div>Min</div><div>Sen</div><div>Sel</div><div>Rab</div><div>Kam</div><div>Jum</div><div>Sab</div>
+                </div>
+                <div id="calendar-grid" class="grid grid-cols-7 gap-1 text-center text-sm"></div>
+            </section>
+
+            <!-- Notes -->
+            <section id="notes" class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-sm">
+                <h2 class="font-bold mb-4">Catatan</h2>
+                <form id="note-form" class="flex gap-2 mb-4">
+                    <input type="text" id="note-text" placeholder="Tulis catatan..." aria-label="Catatan baru" class="input flex-1">
+                    <button type="submit" class="btn-primary">Simpan</button>
+                </form>
+                <ul id="note-list" class="space-y-2" aria-live="polite"></ul>
+            </section>
+
+            <!-- Analytics -->
+            <section id="analytics" class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-sm">
+                <h2 class="font-bold mb-4">Analitik</h2>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                        <p class="text-xs text-gray-500 dark:text-gray-400 mb-1">Task Completion Rate</p>
+                        <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-4 overflow-hidden">
+                            <div id="completion-bar" class="bg-green-500 h-full rounded-full transition-all duration-300" style="width: 0%"></div>
+                        </div>
+                        <p class="text-xs text-gray-500 dark:text-gray-400 mt-1" id="completion-label">0%</p>
+                    </div>
+                    <div>
+                        <p class="text-xs text-gray-500 dark:text-gray-400 mb-1">Tugas per Prioritas</p>
+                        <ul id="priority-breakdown" class="text-sm space-y-1"></ul>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Settings -->
+            <section id="settings" class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-sm">
+                <h2 class="font-bold mb-4">Pengaturan</h2>
+                <div class="flex flex-wrap gap-3">
+                    <label class="flex items-center gap-2 text-sm">
+                        <input type="checkbox" id="setting-dark-mode"> Mode Gelap
+                    </label>
+                    <button id="reset-data" class="btn-danger">Reset Semua Data</button>
+                </div>
+            </section>
+
+        </main>
+    </div>
+
+    <!-- Edit Task Modal -->
+    <div id="edit-modal" class="fixed inset-0 bg-black/50 hidden items-center justify-center z-40 p-4" role="dialog" aria-modal="true" aria-labelledby="edit-modal-title">
+        <div class="bg-white dark:bg-gray-800 rounded-lg p-6 w-full max-w-md shadow-xl">
+            <h3 id="edit-modal-title" class="font-bold text-lg mb-4">Edit Tugas</h3>
+            <form id="edit-form" class="space-y-3">
+                <input type="hidden" id="edit-id">
+                <input type="text" id="edit-title" placeholder="Judul" aria-label="Judul" class="input w-full">
+                <input type="text" id="edit-description" placeholder="Deskripsi" aria-label="Deskripsi" class="input w-full">
+                <input type="date" id="edit-deadline" aria-label="Deadline" class="input w-full">
+                <select id="edit-priority" aria-label="Prioritas" class="input w-full">
+                    <option value="LOW">LOW</option>
+                    <option value="MEDIUM">MEDIUM</option>
+                    <option value="HIGH">HIGH</option>
+                    <option value="URGENT">URGENT</option>
+                </select>
+                <div class="flex gap-2 justify-end">
+                    <button type="button" id="edit-cancel" class="btn-secondary">Batal</button>
+                    <button type="submit" class="btn-primary">Simpan</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script src="assets/script.js"></script>
+</body>
+</html>

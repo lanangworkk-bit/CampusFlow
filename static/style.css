@@ -1,9 +1,0 @@
-body {
-    font-family: 'Inter', sans-serif;
-}
-
-@media (max-width: 768px) {
-    .sidebar {
-        display: none;
-    }
-}
