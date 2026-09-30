@@ -110,6 +110,22 @@ class Course(db.Model):
 class Task(db.Model):
     __tablename__ = 'tasks'
 
+    # Index majemuk untuk kombinasi query yang paling sering terjadi.
+    #
+    # Index di atas (status, priority, deadline, user_id) masing-masing
+    # hanya Integrity satu kolom. Yang sering dipakai justru kombinasi:
+    # filter status lalu urut deadline, atau milik user lalu urut
+    # deadline. Tanpa index majemuk, kedua query itu menyisir seluruh
+    # tabel lalu mengurutkan di memori.
+    #
+    # Dideklarasikan di sini, bukan dibuat lewat CREATE INDEX terpisah,
+    # supaya migration Alembic melihatnya sebagai bagian dari skema.
+    # Kalau dibuat runtime, Alembic akan mengira index ini perlu dihapus.
+    __table_args__ = (
+        db.Index('ix_tasks_status_deadline', 'status', 'deadline'),
+        db.Index('ix_tasks_user_deadline', 'user_id', 'deadline'),
+    )
+
     id = db.Column(db.Integer, primary_key=True)
     title = db.Column(db.String(200), nullable=False, index=True)
     description = db.Column(db.Text, default='')

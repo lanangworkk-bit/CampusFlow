@@ -98,6 +98,29 @@ def _error(message, code=400, **extra):
     return jsonify(body), code
 
 
+def _own_note(note):
+    """Ambil catatan hanya kalau boleh diakses oleh user sekarang.
+
+    Catatan bersifat pribadi. Tanpa pemeriksaan ini, student yang tahu
+    id catatan orang lain bisa membacanya lewat URL, dan lebih buruk
+    lagi bisa mengubah atau menghapusnya. Student hanya melihat
+    catatannya sendiri; admin boleh semuanya, karena mungkin perlu memeriksa atau
+    memperbaiki data catatan.
+    """
+    if note is None:
+        return _error('Note not found', code=404)
+
+    user = current_user()
+    if user and user.role == 'admin':
+        return None
+    if user and note.user_id is not None and note.user_id == user.id:
+        return None
+
+    # Balas 404, bukan 403. Kalau dibalas 403, penyerang tahu bahwa
+    # id itu benar-benar ada. 404 tidak membocorkan apa pun.
+    return _error('Note not found', code=404)
+
+
 def _owner_filter(query):
     """Batasi hasil ke milik user yang sedang login.
 
@@ -540,9 +563,10 @@ def create_note():
 @jwt_required()
 @validate_body()
 def update_note(note_id):
+    denied = _own_note(db.session.get(Note, note_id))
+    if denied is not None:
+        return denied
     note = db.session.get(Note, note_id)
-    if note is None:
-        return _error('Note not found', code=404)
     data = body()
 
     if 'text' in data:
@@ -562,9 +586,9 @@ def update_note(note_id):
 @resources_bp.route('/notes/<int:note_id>', methods=['DELETE'])
 @jwt_required()
 def delete_note(note_id):
-    note = db.session.get(Note, note_id)
-    if note is None:
-        return _error('Note not found', code=404)
-    db.session.delete(note)
+    denied = _own_note(db.session.get(Note, note_id))
+    if denied is not None:
+        return denied
+    db.session.delete(db.session.get(Note, note_id))
     db.session.commit()
     return jsonify({'message': 'Note deleted'}), 200

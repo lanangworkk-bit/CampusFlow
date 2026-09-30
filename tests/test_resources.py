@@ -242,3 +242,59 @@ class TestKontrakValidasi:
 
     def test_tugas_tanpa_deadline_diterima(self, auth_client):
         assert auth_client.post('/api/tasks', json={'title': 'Noid'}).status_code == 201
+
+
+class TestCatatanPribadi:
+    """Catatan tidak boleh bisa diakses user lain, bahkan lewat URL."""
+
+    def test_update_catatan_orang_lain_ditolak(self, auth_client, db, admin):
+        from backend.models import Note
+        note = Note(text='Rahasia admin', user_id=admin.id)
+        db.session.add(note)
+        db.session.commit()
+
+        response = auth_client.put(
+            f'/api/notes/{note.id}', json={'text': 'Dibaca student'}
+        )
+        assert response.status_code == 404
+        assert db.session.get(Note, note.id).text == 'Rahasia admin'
+
+    def test_delete_catatan_orang_lain_ditolak(self, auth_client, db, admin):
+        from backend.models import Note
+        note = Note(text='Rahasia admin', user_id=admin.id)
+        db.session.add(note)
+        db.session.commit()
+
+        assert auth_client.delete(f'/api/notes/{note.id}').status_code == 404
+        assert db.session.get(Note, note.id) is not None
+
+    def test_balas_404_bukan_403(self, auth_client, db, admin):
+        """Jangan bocorkan bahwa id itu ada.
+
+        Kalau dibalas 403, penyerang tahu catatan itu nyata ada.
+        Untuk catatan pribadi, 404 lebih aman.
+        """
+        from backend.models import Note
+        note = Note(text='Rahasia admin', user_id=admin.id)
+        db.session.add(note)
+        db.session.commit()
+        assert auth_client.delete(f'/api/notes/{note.id}').get_json().get(
+            'error'
+        ) == 'Note not found'
+
+    def test_pemilik_bisa_ubah_catatannya(self, auth_client):
+        note = auth_client.post('/api/notes', json={'text': 'Milik saya'}).get_json()
+        response = auth_client.put(
+            f"/api/notes/{note['id']}", json={'text': 'Sudah diubah'}
+        )
+        assert response.status_code == 200
+        assert response.get_json()['text'] == 'Sudah diubah'
+
+    def test_admin_tetap_bisa_akses(self, admin_client, db, user):
+        from backend.models import Note
+        note = Note(text='Catatan student', user_id=user.id)
+        db.session.add(note)
+        db.session.commit()
+        assert admin_client.put(
+            f'/api/notes/{note.id}', json={'text': 'Diperbaiki admin'}
+        ).status_code == 200

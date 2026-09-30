@@ -95,28 +95,24 @@ INDEXES = [
 
 
 def create_performance_indexes(app):
-    """Buat index tambahan yang tidak otomatis dibuat ORM.
+    """Pastikan index majemuk benar-benar ada.
 
-    Index pada kolom yang sudah punya index=True di model tidak perlu
-    dibuat lagi. Yang di sini adalah index majemuk (composite) untuk
-    kombinasi query yang sering dipakai, misalnya filter status
-    lalu urut berdasarkan deadline.
+    Index-nya dideklarasikan di model (Task.__table_args__), jadi
+    create_all() dan migration Alembic sudah membuatnya. Fungsi ini
+    hanya untuk database lama yang dibuat sebelum index itu ada, dan
+    aman dipanggil berulang karena memakai IF NOT EXISTS.
+
+    Jangan tambahkan index lewat CREATE INDEX terpisah di file lain:
+    Alembic akan mengira index itu tidak ada di skema lalu tries
+    menghapusnya di migration berikutnya.
     """
+    statements = [
+        'CREATE INDEX IF NOT EXISTS ix_tasks_status_deadline '
+        'ON tasks (status, deadline)',
+        'CREATE INDEX IF NOT EXISTS ix_tasks_user_deadline '
+        'ON tasks (user_id, deadline)',
+    ]
     with app.app_context():
-        statements = [
-            # Filter status + urut deadline: sering dipakai untuk tab
-            # "Belum" dan "Terlambat".
-            'CREATE INDEX IF NOT EXISTS ix_tasks_status_deadline '
-            'ON tasks (status, deadline)',
-            # Milik user + urut deadline: ini query paling sering,
-            # hampir setiap pembukaan dashboard.
-            'CREATE INDEX IF NOT EXISTS ix_tasks_user_deadline '
-            'ON tasks (user_id, deadline)',
-            # Pencarian teks: ILIKE '%kata%' tidak bisa pakai index
-            # B-tree, tapi index tetap membantu sebagian kondisi.
-            'CREATE INDEX IF NOT EXISTS ix_tasks_title '
-            'ON tasks (title)',
-        ]
         for statement in statements:
             try:
                 db.session.execute(text(statement))

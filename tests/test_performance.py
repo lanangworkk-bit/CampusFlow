@@ -162,3 +162,40 @@ class TestTableStats:
             stats = optimize.table_stats(app)
         assert 'tasks' in stats
         assert stats['tasks'] == 5
+
+
+class TestIndexDariModel:
+    """Index harus dideklarasikan di model, bukan dibuat runtime.
+
+    Index yang dibuat lewat CREATE INDEX terpisah tidak terlihat oleh
+    Alembic, sehingga migration berikutnya akan mencoba menghapusnya
+    karena mengira index itu tidak ada di skema.
+    """
+
+    def test_index_majemuk_ada_di_metadata(self, app):
+        with app.app_context():
+            from backend.models import Task
+            names = {i.name for i in Task.__table__.indexes}
+        assert 'ix_tasks_status_deadline' in names
+        assert 'ix_tasks_user_deadline' in names
+
+    def test_urutan_kolom_benar(self, app):
+        with app.app_context():
+            from backend.models import Task
+            by_name = {i.name: [c.name for c in i.columns]
+                       for i in Task.__table__.indexes}
+        assert by_name['ix_tasks_status_deadline'] == ['status', 'deadline']
+        assert by_name['ix_tasks_user_deadline'] == ['user_id', 'deadline']
+
+    def test_semua_index_sama_ada_di_sqlite(self, app, db, user):
+        """Index yang di model harus benar-benar ada di database."""
+        with app.app_context():
+            from backend.models import Task
+            rows = optimize.db.session.execute(
+                optimize.text(
+                    "SELECT name FROM sqlite_master WHERE type='index'"
+                )
+            ).fetchall()
+            sqlite_names = {r[0] for r in rows}
+        for index in Task.__table__.indexes:
+            assert index.name in sqlite_names, f'{index.name} hilang di DB'

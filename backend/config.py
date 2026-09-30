@@ -69,9 +69,14 @@ class Config:
 class DevelopmentConfig(Config):
     DEBUG = True
 
+    # Development dan testing membuat tabel otomatis supaya tidak perlu
+    # Migration hanya untuk menjalankan kode.
+    AUTO_CREATE_TABLES = True
+
 
 class TestingConfig(Config):
     TESTING = True
+    AUTO_CREATE_TABLES = True
     SQLALCHEMY_DATABASE_URI = 'sqlite://'
     JWT_ACCESS_TOKEN_EXPIRES = False
     RATELIMIT_ENABLED = False
@@ -79,6 +84,16 @@ class TestingConfig(Config):
 
 class ProductionConfig(Config):
     DEBUG = False
+
+    # Produksi TIDAK membuat tabel otomatis. Skema harus dibangun lewat
+    # `flask --app backend.app db upgrade` supaya ada riwayat migration
+    # yang bisa diaudit dan di-rollback.
+    #
+    # Kalau create_all() tetap dipakai di produksi, Alembic akan selalu
+    # melaporkan "no changes": tabelnya sudah ada duluan, tanpa pernah
+    # tercatat di tabel alembic_version. Akibatnya migration yang
+    # sesungguhnya mengubah skema tidak bisa dibuat dengan benar.
+    AUTO_CREATE_TABLES = False
 
     @classmethod
     def validate(cls):

@@ -324,15 +324,39 @@ function renderNotes() {
         </div>`).join('');
 }
 
+/**
+ * Isi pilihan mata kuliah di form dan di toolbar filter.
+ *
+ * Dua dropdown ini memakai data yang sama, jadi keduanya diisi
+ * sekaligus. Kalau hanya yang form, dropdown filter akan selalu
+ * kosong dan fiturnya tidak bisa dipakai.
+ */
 function renderCourseOptions() {
-    const sel = $('#taskCourse');
-    if (!sel) return;
-    const current = sel.value;
-    sel.innerHTML = '<option value="">Tanpa mata kuliah</option>' +
-        state.courseOptions.map((c) =>
-            `<option value="${c.id}">${escapeHTML(c.code)} — ${escapeHTML(c.name)}</option>`
-        ).join('');
-    if (current) sel.value = current;
+    const options = state.courseOptions
+        .map((c) => `<option value="${c.id}">${escapeHTML(c.code)} — ${escapeHTML(c.name)}</option>`)
+        .join('');
+
+    // Form tugas: boleh memilih "tanpa mata kuliah".
+    const form = $('#taskCourse');
+    if (form) {
+        const current = form.value;
+        form.innerHTML = '<option value="">Tanpa mata kuliah</option>' + options;
+        if (current) form.value = current;
+    }
+
+    // Toolbar filter: tidak ada opsi "tanpa", hanya "semua".
+    const filter = $('#courseFilter');
+    if (filter) {
+        const current = filter.value;
+        filter.innerHTML = '<option value="">Semua mata kuliah</option>' + options;
+        // Course yang sedang difilter bisa terhapus di server, jadi
+        // jangan tinggalkan nilai yang sudah tidak ada di daftar.
+        if (current && state.courseOptions.some((c) => String(c.id) === current)) {
+            filter.value = current;
+        } else {
+            filter.value = '';
+        }
+    }
 }
 
 function renderStats() {

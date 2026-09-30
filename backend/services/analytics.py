@@ -33,12 +33,38 @@ def summary(user_id=None):
 
     tasks = query.all()
     total = len(tasks)
-    done = sum(1 for t in tasks if t.status == 'COMPLETED')
-    overdue = sum(1 for t in tasks if t.effective_status() == 'OVERDUE')
-    in_progress = sum(1 for t in tasks if t.status == 'IN PROGRESS')
-    todo = sum(1 for t in tasks if t.status == 'TODO')
+
+    # Hitung dari effective_status(), bukan dari kolom status mentah.
+    #
+    # Status OVERDUE tidak pernah tersimpan di database; dia dihitung
+    # dari perbandingan deadline dengan tanggal sekarang. Kalau
+    # in_progress dan todo dihitung dari kolom mentah, sebuah tugas
+    # yang lewat tenggat akan terhitung di OVERDUE sekaligus di
+    # IN PROGRESS, sehingga jumlah status melebihi total tugas.
+    #
+    # Dengan effective_status(), keempat status ini saling lepas dan
+    # jumlahannya selalu sama dengan total.
+    buckets = {'COMPLETED': 0, 'OVERDUE': 0, 'IN PROGRESS': 0, 'TODO': 0}
+    for task in tasks:
+        status = task.effective_status()
+        if status in buckets:
+            buckets[status] += 1
+        else:
+            buckets['TODO'] += 1
+
+    done = buckets['COMPLETED']
+    overdue = buckets['OVERDUE']
+    in_progress = buckets['IN PROGRESS']
+    todo = buckets['TODO']
 
     progress_total = sum(t.progress for t in tasks)
+
+    # Catatan bersifat pribadi, jadi jumlahnya ikut dibatasi ke user
+    # yang sedang melihat. Mata kuliah boleh dipakai bersama, jadi
+    # jumlahnya memang global.
+    notes_query = Note.query
+    if user_id is not None:
+        notes_query = notes_query.filter_by(user_id=user_id)
 
     return {
         'total': total,
@@ -49,7 +75,7 @@ def summary(user_id=None):
         'completion_rate': _pct(done, total),
         'average_progress': round(progress_total / total, 1) if total else 0,
         'total_courses': Course.query.count(),
-        'total_notes': Note.query.count(),
+        'total_notes': notes_query.count(),
     }
 
 

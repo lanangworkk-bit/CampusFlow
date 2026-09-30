@@ -18,12 +18,44 @@ class TestSummary:
         result = analytics.summary(user.id)
         assert result['total'] == 5
         assert result['completed'] == 1
-        assert result['in_progress'] == 1
-        # 3 task berstatus TODO mentah (Alpha, Gamma, Epsilon).
-        # Gamma ditampilkan OVERDUE karena tenggatnya lewat, jadi
-        # angka ini dihitung dari kolom status, bukan tampilan.
-        assert result['todo'] == 3
+        # Beta (IN PROGRESS, tenggat 2026-09-20) dan Gamma (TODO,
+        # tenggat 2026-01-01) sama-sama sudah lewat tenggat, jadi
+        # keduanya tampil OVERDUE dan tidak dihitung lagi di
+        # IN PROGRESS atau TODO.
+        assert result['overdue'] == 2
+        assert result['in_progress'] == 0
+        assert result['todo'] == 2
         assert result['completion_rate'] == 20.0
+
+    def test_status_saling_lepas(self, seeded, user):
+        """Keempat status harus bisa dijumlahkan tepat ke total.
+
+        Ini yang menahan bug lama: OVERDUE dihitung dari tanggal
+        sementara IN PROGRESS dan TODO dibaca dari kolom status
+        mentah, sehingga satu tugas terhitung dua kali dan
+        jumlahnya melebihi total.
+        """
+        result = analytics.summary(user.id)
+        jumlah = (
+            result['completed'] + result['overdue']
+            + result['in_progress'] + result['todo']
+        )
+        assert jumlah == result['total']
+
+    def test_tugas_lewat_tenggat_tidak_terhitung_di_status_aslinya(self, db, user):
+        """Satu tugas yang lewat tenggat hanya boleh masuk satu kategori."""
+        from backend.models import Task
+        db.session.add(Task(
+            title='Telat', user_id=user.id,
+            status='IN PROGRESS', deadline='2020-01-01',
+        ))
+        db.session.commit()
+
+        result = analytics.summary(user.id)
+        assert result['overdue'] == 1
+        assert result['in_progress'] == 0
+        assert result['completed'] + result['overdue'] \
+            + result['in_progress'] + result['todo'] == result['total'] == 1
 
     def test_tidak_bagi_nol(self, db):
         result = analytics.summary()

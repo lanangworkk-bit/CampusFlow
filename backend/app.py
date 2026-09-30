@@ -57,10 +57,16 @@ def create_app(config_name=None):
     # Semua model harus sudah ter-import sebelum create_all() dipanggil,
     # supaya SQLAlchemy tahu tabel mana yang perlu dibuat. Import-nya
     # diletakkan di dalam fungsi supaya tidak ada circular import.
-    with app.app_context():
-        from backend.models import AuditLog, Course, Note, Task, User  # noqa: F401
+    if app.config.get('AUTO_CREATE_TABLES', True):
+        with app.app_context():
+            from backend.models import AuditLog, Course, Note, Task, User  # noqa: F401
 
-        db.create_all()
+            db.create_all()
+    else:
+        app.logger.info(
+            'AUTO_CREATE_TABLES dimatikan. Jalankan '
+            '`flask --app backend.app db upgrade` untuk membuat skema.'
+        )
 
     # Index tambahan dan penghitung query. Index memakai
     # CREATE INDEX IF NOT EXISTS, jadi aman dipanggil berulang.
@@ -264,8 +270,27 @@ app = create_app()
 
 
 if __name__ == '__main__':
+    # Jalankan dengan `python3 -m backend.app`.
+    #
+    # Ini untuk pengembangan lokal. Untuk produksi pakai gunicorn
+    # (make run), karena app.run() adalah server bawaan Flask yang
+    # memang dirancang untuk development.
     port = int(os.environ.get('PORT', 5002))
-    debug = os.environ.get('FLASK_DEBUG', '1') == '1'
+    environment = os.environ.get('FLASK_ENV', 'development').lower()
+
+    # Auto-reload hanya aktif di development.
+    #
+    # Dulu FLASK_DEBUG di sini default-nya '1', sehingga aplikasi
+    # jalan dengan mode debug bahkan saat FLASK_ENV=production. Selain
+    # memakai server development, itu membuat app.debug jadi True,
+    # yang otomatis mematikan header HSTS karena klausul "hanya di
+    # produksi". Header itu justru yang paling penting di produksi.
+    default_debug = '0' if environment == 'production' else '1'
+    debug = os.environ.get('FLASK_DEBUG', default_debug) == '1'
+
     print(f'  CampusFlow -> http://localhost:{port}')
     print(f'  Health     -> http://localhost:{port}/api/health')
+    print(f'  Mode       -> {environment} (debug: {"on" if debug else "off"})')
+    if environment == 'production':
+        print('  Catatan    -> untuk produksi pakai gunicorn: make run')
     app.run(host='0.0.0.0', port=port, debug=debug, use_reloader=debug)

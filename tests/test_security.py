@@ -256,3 +256,61 @@ class TestContentSecurityPolicy:
             assert '<script>' not in html, f'{name} punya script inline'
             assert ' style="' not in html, f'{name} punya atribut style inline'
             assert '<style>' not in html, f'{name} punya blok style inline'
+
+
+class TestEnvironmentHeaders:
+    """Hanya produksi yang boleh mengirim HSTS.
+
+    HSTS membuat browser mengingat aturan "pakai HTTPS saja" selama
+    masa berlaku max-age. Kalau dikirim ke http://localhost, browser akan menolak
+    koneksi http berikutnya, termasuk ke server lokal. Karena itu
+    harus benar-benar tidak ada di development.
+    """
+
+    def test_development_tanpa_hsts(self):
+        from backend.app import create_app
+        app = create_app('development')
+        with app.test_client() as c:
+            assert 'Strict-Transport-Security' not in c.get('/').headers
+
+    def test_production_dengan_hsts(self):
+        from backend.app import create_app
+        app = create_app('production')
+        with app.test_client() as c:
+            hsts = c.get('/').headers.get('Strict-Transport-Security', '')
+        assert hsts
+        assert 'max-age=' in hsts
+        assert 'includeSubDomains' in hsts
+
+    def test_production_tidak_membuat_tabel_otomatis(self):
+        """Produksi harus pakai migration, bukan create_all().
+
+        Kalau tabel dibuat duluan tanpa mencatat revision-nya,
+        Alembic selalu melaporkan "no changes" dan migration yang
+        sebenarnya mengubah skema tidak bisa dibuat dengan benar.
+        """
+        from backend.app import create_app
+        assert create_app('production').config['AUTO_CREATE_TABLES'] is False
+        assert create_app('development').config['AUTO_CREATE_TABLES'] is True
+
+    def test_main_tidak_maksa_debug_di_produksi(self):
+        """Blok __main__ tidak boleh menyalakan debug di produksi.
+
+        app.run(debug=True) menimpa app.debug menjadi True, dan itu
+        otomatis mematikan HSTS karena syaratnya DEBUG harus False.
+        """
+        from pathlib import Path
+        source = (Path(__file__).resolve().parent.parent
+                  / 'backend' / 'app.py').read_text()
+        main_block = source.split("if __name__ == '__main__':")[1]
+
+        # Bentuk lama yang salah: debug di-default aktif tanpa
+        # melihat environment.
+        assert "os.environ.get('FLASK_DEBUG', '1')" not in main_block, (
+            'debug masih di-default aktif tanpa melihat FLASK_ENV'
+        )
+
+        # Bentuk yang benar: default mengikuti environment.
+        assert "default_debug = '0' if environment == 'production' else '1'" \
+            in main_block
+        assert "os.environ.get('FLASK_ENV', 'development')" in main_block

@@ -102,6 +102,31 @@ Salin `.env.example` jadi `.env` untuk mengubah nilai:
 Mode `production` menolak berjalan kalau `SECRET_KEY` masih memakai
 kunci bawaan. Periksa dengan `flask --app backend.app check`.
 
+## Migrasi database
+
+Skema dikelola dengan Alembic. Setiap perubahan model menghasilkan satu
+file di `migrations/versions/`, jadi riwayat perubahan tersimpan dan
+bisa di-rollback.
+
+```bash
+# Setelah mengubah model
+flask --app backend.app db migrate -m "tambah kolom selesai_di"
+flask --app backend.app db upgrade
+
+# Melihat perubahan yang belum dimigrasikan
+flask --app backend.app db migrate --check
+```
+
+Mode `production` sengaja tidak membuat tabel otomatis. Kalau
+`create_all()` ikut dipakai di produksi, tabelnya sudah ada sebelum
+Alembic sempat mencatat revision, sehingga Alembic selalu melaporkan
+"no changes" dan migration yang sebenarnya mengubah skema tidak akan
+tercatat.
+
+Tabel dan index dideklarasikan di model. Jangan menambahkan index lewat
+`CREATE INDEX` terpisah di file lain, karena Alembic tidak akan melihat
+dan akan mencoba menghapusnya di migration berikutnya.
+
 ## Struktur
 
 ```
@@ -112,6 +137,8 @@ backend/
   routes/             endpoint auth, resource, analytics, system
   services/           logika analytics, keamanan, optimasi
   seed_data.py        data contoh
+  version.py          nomor versi
+migrations/           riwayat skema (Alembic)
 templates/            halaman HTML
 static/               CSS dan JavaScript
 tests/                test pytest
