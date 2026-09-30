@@ -343,48 +343,61 @@ function offsetDate(days) {
 // --------------------------------------------
 // 4. Render Tasks
 // --------------------------------------------
+// Search/filter/sort sekarang dikirim ke SERVER lewat query parameter.
+// Server yang memfilter, lalu hasilnya yang di-render.
+//
+// Debounce: menunggu 300ms setelah user berhenti mengetik.
+// Tanpa ini, ketik "flutter" = 7 request (f, fl, flu, flut, ...).
+// Dengan debounce, cukup 1 request.
+let filterTimer = null;
+let searchCache = "";
+let currentFilters = {
+  search: "",
+  status: "all",
+  priority: "all",
+  sort: "deadline",
+  order: "asc",
+};
 
-function getFilteredTasks() {
-  const searchTerm = document
-    .getElementById("task-search")
-    .value.toLowerCase()
-    .trim();
-  const statusFilter = document.getElementById("filter-status").value;
-  const priorityFilter = document.getElementById("filter-priority").value;
+// Hitung ulang daftar dari server sesuai filter saat ini.
+function applyFilters(immediate) {
+  clearTimeout(filterTimer);
+  filterTimer = setTimeout(refreshFromServer, immediate ? 0 : 300);
+}
 
-  return getTasks().filter(function (task) {
-    const matchesSearch =
-      task.title.toLowerCase().includes(searchTerm) ||
-      (task.description || "").toLowerCase().includes(searchTerm);
+// Minta daftar task ke server dengan filter yang sedang aktif.
+function refreshFromServer() {
+  const params = new URLSearchParams();
+  if (currentFilters.search) params.set("search", currentFilters.search);
+  if (currentFilters.status !== "all") params.set("status", currentFilters.status);
+  if (currentFilters.priority !== "all")
+    params.set("priority", currentFilters.priority);
+  params.set("sort", currentFilters.sort);
+  params.set("order", currentFilters.order);
 
-    const matchesStatus =
-      statusFilter === "all" || getEffectiveStatus(task) === statusFilter;
-
-    const matchesPriority =
-      priorityFilter === "all" || task.priority === priorityFilter;
-
-    return matchesSearch && matchesStatus && matchesPriority;
-  });
+  return api("/api/tasks?" + params.toString())
+    .then(function (tasks) {
+      cachedTasks = tasks.map(normalizeTask);
+      renderTasks();
+      renderStats();
+      renderAnalytics();
+    })
+    .catch(handleApiError);
 }
 
 function renderTasks() {
   const listEl = document.getElementById("task-list");
-  const tasks = getFilteredTasks();
+  const tasks = getTasks();
 
   if (tasks.length === 0) {
     listEl.innerHTML = emptyStateHTML();
     return;
   }
 
-  tasks
-    .sort(function (a, b) {
-      if (!a.deadline) return 1;
-      if (!b.deadline) return -1;
-      return a.deadline.localeCompare(b.deadline);
-    })
-    .forEach(function (task) {
-      listEl.insertAdjacentHTML("beforeend", taskCardHTML(task));
-    });
+  listEl.innerHTML = "";
+  tasks.forEach(function (task) {
+    listEl.insertAdjacentHTML("beforeend", taskCardHTML(task));
+  });
 }
 
 function emptyStateHTML() {
@@ -487,8 +500,7 @@ function addTask(event) {
   };
 
   apiCreateTask(newTask)
-    .then(function (task) {
-      cachedTasks.push(normalizeTask(task));
+    .then(function () {
       event.target.reset();
       refresh();
     })
@@ -504,15 +516,7 @@ function toggleTask(id) {
 
   const nextStatus = task.status === "COMPLETED" ? "TODO" : "COMPLETED";
 
-  apiUpdateTask(id, { status: nextStatus })
-    .then(function (updated) {
-      const index = cachedTasks.findIndex(function (t) {
-        return t.id == id;
-      });
-      if (index !== -1) cachedTasks[index] = normalizeTask(updated);
-      refresh();
-    })
-    .catch(handleApiError);
+  apiUpdateTask(id, { status: nextStatus }).then(refresh).catch(handleApiError);
 }
 
 function updateProgress(id, value) {
@@ -560,14 +564,7 @@ function deleteTask(id) {
   if (!task) return;
   if (!window.confirm('Hapus tugas "' + task.title + '"?')) return;
 
-  apiDeleteTask(id)
-    .then(function () {
-      cachedTasks = cachedTasks.filter(function (t) {
-        return t.id != id;
-      });
-      refresh();
-    })
-    .catch(handleApiError);
+  apiDeleteTask(id).then(refresh).catch(handleApiError);
 }
 
 function updateStatus(id, newStatus) {
@@ -577,15 +574,7 @@ function updateStatus(id, newStatus) {
 
   if (!task) return;
 
-  apiUpdateTask(id, { status: newStatus })
-    .then(function (updated) {
-      const index = cachedTasks.findIndex(function (t) {
-        return t.id == id;
-      });
-      if (index !== -1) cachedTasks[index] = normalizeTask(updated);
-      refresh();
-    })
-    .catch(handleApiError);
+  apiUpdateTask(id, { status: newStatus }).then(refresh).catch(handleApiError);
 }
 
 // --------------------------------------------
@@ -664,11 +653,7 @@ function saveEdit(event) {
   }
 
   apiUpdateTask(id, changes)
-    .then(function (updated) {
-      const index = cachedTasks.findIndex(function (t) {
-        return t.id === id;
-      });
-      if (index !== -1) cachedTasks[index] = normalizeTask(updated);
+    .then(function () {
       closeEditModal();
       refresh();
     })
@@ -1009,11 +994,15 @@ function renderGreeting() {
     });
 }
 
+// Setelah data berubah, selalu ambil ulang dari server supaya
+// filter/sort yang aktif ikut ter-update. Contoh: kalau filter
+// "TODO" aktif lalu task dicentang jadi COMPLETED, task itu
+// harus hilang dari daftar -- kalau hanya render dari cache,
+// dia masih kelihatan sampai refresh halaman.
 function refresh() {
-  renderTasks();
-  renderStats();
-  renderAnalytics();
-  renderCalendar();
+  return refreshFromServer().then(function () {
+    renderCalendar();
+  });
 }
 
 function init() {
@@ -1039,13 +1028,41 @@ function init() {
     .addEventListener("click", function () {
       changeMonth(1);
     });
-  document.getElementById("task-search").addEventListener("input", renderTasks);
+  // Search: debounce 300ms supaya tidak spam request
+  document.getElementById("task-search").addEventListener("input", function () {
+    currentFilters.search = this.value.trim();
+    applyFilters();
+  });
+
+  // Filter & sort: langsung, karena user tidak mengetik
   document
     .getElementById("filter-status")
-    .addEventListener("change", renderTasks);
+    .addEventListener("change", function () {
+      currentFilters.status = this.value;
+      applyFilters(true);
+    });
+
   document
     .getElementById("filter-priority")
-    .addEventListener("change", renderTasks);
+    .addEventListener("change", function () {
+      currentFilters.priority = this.value;
+      applyFilters(true);
+    });
+
+  document.getElementById("sort-by").addEventListener("change", function () {
+    currentFilters.sort = this.value;
+    applyFilters(true);
+  });
+
+  document.getElementById("sort-order").addEventListener("click", function () {
+    currentFilters.order = currentFilters.order === "asc" ? "desc" : "asc";
+    this.textContent = currentFilters.order === "asc" ? "↑" : "↓";
+    this.setAttribute(
+      "aria-label",
+      currentFilters.order === "asc" ? "Urutkan menurun" : "Urutkan menaik",
+    );
+    applyFilters(true);
+  });
   document
     .getElementById("setting-dark-mode")
     .addEventListener("change", function (event) {

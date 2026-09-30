@@ -1,10 +1,15 @@
 from flask import Flask, request, jsonify, render_template
 import sqlite3
 import os
+from datetime import date
 
 app = Flask(__name__, template_folder='../templates', static_folder='../static')
 
 DB_PATH = os.path.join(os.path.dirname(__file__), '..', 'database', 'campusflow.db')
+
+
+def todayISO():
+    return date.today().isoformat()
 
 
 def get_db():
@@ -59,10 +64,85 @@ def index():
     return render_template('index.html')
 
 
+SORTABLE_COLUMNS = ('deadline', 'title', 'priority', 'status', 'created_at')
+# OVERDUE tidak disimpan sebagai nilai di kolom status, tapi user
+# tetap boleh memfilter dengannya karena itu status turunan yang
+# dipakai di frontend.
+VALID_STATUSES = ('TODO', 'IN PROGRESS', 'COMPLETED', 'OVERDUE')
+VALID_PRIORITIES = ('LOW', 'MEDIUM', 'HIGH', 'URGENT')
+
+
 @app.route('/api/tasks', methods=['GET'])
 def get_tasks():
+    """Besarkan daftar task dengan filter, pencarian, dan sorting.
+
+    Contoh:
+        /api/tasks
+        /api/tasks?status=TODO
+        /api/tasks?search=flutter&priority=HIGH
+        /api/tasks?sort=title&order=desc
+        /api/tasks?limit=10&offset=20
+    """
+    search = request.args.get('search', '').strip()
+    status = request.args.get('status', '').strip()
+    priority = request.args.get('priority', '').strip()
+    sort = request.args.get('sort', 'deadline').strip()
+    order = request.args.get('order', 'asc').strip().upper()
+    limit = request.args.get('limit', type=int)
+    offset = request.args.get('offset', type=int)
+
+    # --- Validasi input dari user ---
+    # Nama kolom TIDAK bisa dimasukkan sebagai parameter SQL (?),
+    # jadi HARUS dicek dulu terhadap daftar yang diizinkan (whitelist).
+    # Tanpa ini, user bisa menulis: ?sort=id; DROP TABLE tasks
+    if sort not in SORTABLE_COLUMNS:
+        sort = 'deadline'
+    if order not in ('ASC', 'DESC'):
+        order = 'ASC'
+    if status and status not in VALID_STATUSES:
+        status = ''
+    if priority and priority not in VALID_PRIORITIES:
+        priority = ''
+
+    # --- Bangun query secara dinamis ---
+    clauses = []
+    params = []
+
+    if search:
+        clauses.append('(title LIKE ? OR description LIKE ?)')
+        keyword = f'%{search}%'
+        params.extend([keyword, keyword])
+
+    if status:
+        # OVERDUE bukan kolom di database, tapi status turunan
+        # (deadline lewat & belum selesai), jadi ditangani terpisah.
+        if status == 'OVERDUE':
+            clauses.append("status != 'COMPLETED' AND deadline IS NOT NULL AND deadline < ?")
+            params.append(todayISO())
+        else:
+            clauses.append('status = ?')
+            params.append(status)
+
+    if priority:
+        clauses.append('priority = ?')
+        params.append(priority)
+
+    sql = 'SELECT * FROM tasks'
+    if clauses:
+        sql += ' WHERE ' + ' AND '.join(clauses)
+
+    # Kolom sudah divalidasi di atas, jadi aman dipasang langsung.
+    sql += f' ORDER BY {sort} {order}, id ASC'
+
+    if limit is not None:
+        sql += ' LIMIT ?'
+        params.append(max(1, min(limit, 200)))
+        if offset is not None:
+            sql += ' OFFSET ?'
+            params.append(max(0, offset))
+
     db = get_db()
-    rows = db.execute('SELECT * FROM tasks ORDER BY deadline ASC').fetchall()
+    rows = db.execute(sql, params).fetchall()
     result = [dict(row) for row in rows]
     db.close()
     return jsonify(result)

@@ -122,6 +122,14 @@
                             <option value="COMPLETED">COMPLETED</option>
                             <option value="OVERDUE">OVERDUE</option>
                         </select>
+                        <select id="sort-by" aria-label="Urutkan berdasarkan" class="input w-40">
+                            <option value="deadline">Deadline</option>
+                            <option value="title">Judul</option>
+                            <option value="priority">Prioritas</option>
+                            <option value="status">Status</option>
+                            <option value="created_at">Tanggal dibuat</option>
+                        </select>
+                        <button id="sort-order" type="button" aria-label="Balik urutan" title="Balik urutan" class="input w-12">↑</button>
                     </div>
                 </div>
                 <div id="task-list" class="space-y-3" aria-live="polite"></div>
