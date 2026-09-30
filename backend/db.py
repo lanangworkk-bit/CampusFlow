@@ -58,6 +58,36 @@ def todayISO():
     return date.today().isoformat()
 
 
+def parse_date(value):
+    """Validasi tanggal dari user sebelum disimpan ke database.
+
+    Mengembalikan tuple (nilai_bersih, pesan_error).
+    Cara pakai:
+        value, error = parse_date(data.get('deadline'))
+        if error:
+            return jsonify({'error': error}), 400
+
+    Kenapa perlu? Tanpa ini, browser bisa mengirim deadline: "abc"
+    dan string itu tersimpan apa adanya di database. Efeknya:
+    urutan sort salah, tanggal tampil aneh, dan status OVERDUE
+    jadi tidak akurat.
+    """
+    if value is None:
+        return None, None
+
+    text = str(value).strip()
+    if not text:
+        # Deadline kosong itu valid, artinya task tanpa tenggat.
+        return None, None
+
+    try:
+        # fromisoformat sekaligus memvalidasi format DAN tanggalnya
+        # sungguhan: '2026-13-45' akan ditolak, bukan diterima.
+        return date.fromisoformat(text).isoformat(), None
+    except ValueError:
+        return None, f'Invalid date: {text}. Use YYYY-MM-DD, example: 2026-10-20'
+
+
 def get_db():
     """Buka koneksi ke database.
 

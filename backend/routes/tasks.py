@@ -7,7 +7,7 @@ prefix-nya berulang-ulang di setiap route.
 
 from flask import Blueprint, jsonify, request
 
-from db import get_db, todayISO
+from db import get_db, parse_date, todayISO
 
 tasks_bp = Blueprint('tasks', __name__, url_prefix='/api/tasks')
 
@@ -20,8 +20,16 @@ VALID_PRIORITIES = ('LOW', 'MEDIUM', 'HIGH', 'URGENT')
 VALID_ORDERS = ('ASC', 'DESC')
 MAX_LIMIT = 200
 
+# Kolom yang boleh dipesan user, dipetakan ke ekspresi SQL.
+# Peta (dict) dipakai supaya nama kolom di luar daftar ini tidak
+# bisa lolos ke query sama sekali.
+#
+# COALESCE di 'deadline' itu penting, bukan hiasan. Di SQLite, NULL
+# dianggap lebih kecil dari tanggal manapun, jadi ORDER BY deadline
+# menaruh task tanpa deadline PALING ATAS. Padahal yang masuk akal
+# adalah task tanpa deadline tampil paling bawah.
 SORT_EXPRESSIONS = {
-    'deadline': 't.deadline',
+    'deadline': "COALESCE(t.deadline, '9999-12-31')",
     'title': 't.title',
     'priority': 't.priority',
     'status': 't.status',
@@ -165,12 +173,22 @@ def valid_course_id(db, value):
 @tasks_bp.route('', methods=['POST'])
 def create_task():
     data = request.get_json()
-    if not data or not data.get('title'):
+    # .strip() dulu sebelum dicek: title "   " (spasi saja) itu
+    # dianggap tidak ada, bukan judul kosong yang sah.
+    title = (data.get('title') or '').strip() if data else ''
+    if not title:
         return jsonify({'error': 'Title is required'}), 400
 
     priority = data.get('priority', 'MEDIUM')
     if priority not in VALID_PRIORITIES:
         priority = 'MEDIUM'
+
+    # Deadline yang rusak DITOLAK (400), bukan disimpan diam-diam.
+    # Untuk priority/status, diam-diam pakai default sudah wajar,
+    # karena tidak ada data lama yang jadi acuan.
+    deadline, error = parse_date(data.get('deadline'))
+    if error:
+        return jsonify({'error': error}), 400
 
     db = get_db()
     course_id = valid_course_id(db, data.get('course_id'))
@@ -179,9 +197,9 @@ def create_task():
         'INSERT INTO tasks (title, description, deadline, priority, course_id)'
         ' VALUES (?, ?, ?, ?, ?)',
         (
-            data['title'].strip(),
-            data.get('description', '').strip(),
-            data.get('deadline') or None,
+            title,
+            (data.get('description') or '').strip(),
+            deadline,
             priority,
             course_id,
         ),
@@ -190,6 +208,22 @@ def create_task():
     result = find_task(db, cursor.lastrowid)
     db.close()
     return jsonify(result), 201
+
+
+@tasks_bp.route('/<int:task_id>', methods=['GET'])
+def get_task(task_id):
+    """Ambil satu task by id.
+
+    Tidak dipakai frontend (frontend memuat daftar sekaligus lewat
+    GET /api/tasks), tapi tetap handy saat debugging atau saat mau
+    cek satu data spesifik tanpa harus memfilter daftar.
+    """
+    db = get_db()
+    result = find_task(db, task_id)
+    db.close()
+    if result is None:
+        return jsonify({'error': 'Task not found'}), 404
+    return jsonify(result), 200
 
 
 @tasks_bp.route('/<int:task_id>', methods=['PUT'])
@@ -215,7 +249,14 @@ def update_task(task_id):
         return jsonify({'error': 'Title cannot be empty'}), 400
 
     description = data.get('description', existing['description'])
-    deadline = data.get('deadline', existing['deadline'])
+    if 'deadline' in data:
+        # Kalau user mengirim deadline, harus formatnya benar.
+        deadline, error = parse_date(data['deadline'])
+        if error:
+            db.close()
+            return jsonify({'error': error}), 400
+    else:
+        deadline = existing['deadline']
     priority = data.get('priority', existing['priority'])
     status = data.get('status', existing['status'])
     progress = data.get('progress', existing['progress'])

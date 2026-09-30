@@ -43,7 +43,18 @@ CampusFlow/
 │   ├── script.js           # Logika + API calls
 │   └── style.css           # Custom CSS
 ├── backend/
-│   └── app.py              # Server Flask + REST API
+│   ├── app.py              # Setup app + register blueprint
+│   ├── db.py               # Koneksi database + schema
+│   ├── seed_test_data.py   # Isi data uji lewat API
+│   ├── migrations/
+│   │   └── 001_add_course_to_tasks.sql
+│   └── routes/
+│       ├── __init__.py
+│       ├── main.py         # Halaman + reset
+│       ├── tasks.py        # CRUD task + filter + sort
+│       ├── courses.py      # CRUD mata kuliah + pagination
+│       ├── notes.py        # CRUD catatan
+│       └── stats.py        # Statistik (GROUP BY)
 ├── database/
 │   └── campusflow.db       # Database SQLite (tidak di-commit)
 ├── requirements.txt        # Daftar dependency
@@ -87,33 +98,107 @@ Database akan dibuat otomatis saat pertama kali server jalan.
 
 | Method | URL | Fungsi |
 |---|---|---|
-| `GET` | `/api/tasks` | Ambil semua task |
+| `GET` | `/api/tasks` | Daftar task (filter, sort, paginasi) |
 | `POST` | `/api/tasks` | Tambah task baru |
+| `GET` | `/api/tasks/<id>` | Ambil satu task |
 | `PUT` | `/api/tasks/<id>` | Update task |
 | `DELETE` | `/api/tasks/<id>` | Hapus task |
-| `GET` | `/api/courses` | Ambil semua mata kuliah |
+| `GET` | `/api/courses` | Daftar mata kuliah (berhalaman) |
+| `GET` | `/api/courses/options` | Semua mata kuliah untuk dropdown |
 | `POST` | `/api/courses` | Tambah mata kuliah |
 | `DELETE` | `/api/courses/<id>` | Hapus mata kuliah |
-| `GET` | `/api/notes` | Ambil semua catatan |
+| `GET` | `/api/notes` | Daftar catatan |
 | `POST` | `/api/notes` | Tambah catatan |
 | `DELETE` | `/api/notes/<id>` | Hapus catatan |
+| `GET` | `/api/stats` | Statistik untuk dashboard |
 | `POST` | `/api/reset` | Hapus semua data |
+
+**Parameter query `GET /api/tasks`:**
+
+| Parameter | Contoh | Arti |
+|---|---|---|
+| `search` | `?search=sql` | Cari di judul dan deskripsi |
+| `status` | `?status=TODO` | `TODO`, `IN PROGRESS`, `COMPLETED`, `OVERDUE` |
+| `priority` | `?priority=HIGH` | `LOW`, `MEDIUM`, `HIGH`, `URGENT` |
+| `course_id` | `?course_id=2` | Filter per mata kuliah |
+| `sort` | `?sort=title` | `deadline`, `title`, `priority`, `status`, `created_at` |
+| `order` | `?order=desc` | `asc` atau `desc` |
+| `limit` | `?limit=10` | Maksimal baris (1-200) |
+| `offset` | `?offset=20` | Lewati N baris pertama |
+
+Bisa digabung: `/api/tasks?search=sql&status=TODO&sort=deadline&limit=5`
+
+**Parameter query `GET /api/courses`** (paginasi berbasis nomor halaman):
+
+| Parameter | Contoh | Arti |
+|---|---|---|
+| `search` | `?search=data` | Cari di nama dan kode |
+| `sort` | `?sort=code` | `name`, `code`, `sks`, `task_count` |
+| `order` | `?order=desc` | `asc` atau `desc` |
+| `page` | `?page=2` | Nomor halaman, mulai dari 1 |
+| `per_page` | `?per_page=6` | Item per halaman |
+
+Contoh respons `/api/courses?per_page=3&page=1`:
+
+```json
+{
+  "items": [ ... ],
+  "total": 10,
+  "page": 1,
+  "per_page": 3,
+  "total_pages": 4,
+  "has_next": true,
+  "has_prev": false
+}
+```
+
+Kalau `page` melebihi `total_pages`, server otomatis mengembalikannya ke
+halaman terakhir, jadi frontend tidak perlu meminta halaman yang kosong.
+
+**Cara kerja validasi input** — berbeda antara "tolak" dan "abaikan":
+
+| Field | Nilai tidak valid | Sikap server |
+|---|---|---|
+| `title` kosong / spasi saja | 400 error | ditolak |
+| `deadline` format salah | 400 error | ditolak |
+| `status` / `priority` | pakai default | diabaikan diam-diam |
+| `progress` di luar 0-100 | pakai nilai lama | diabaikan diam-diam |
+| `course_id` tidak ada | `NULL` | dilepas dari course |
+| `sort` / `order` | pakai default | diabaikan diam-diam |
+
+Alasannya: `deadline` yang salah format akan **merusak data** (sorting
+salah, tanggal ditampilkan aneh), jadi harus ditolak. `priority` salah
+koma masih berupa teks yang masuk akal, jadi lebih aman diabaikan daripada
+menolak seluruh request.
 
 **Test API tanpa browser** — buka `http://localhost:5002/api/tasks` di browser,
 atau pakai `curl` di terminal:
 
 ```bash
 curl http://localhost:5002/api/tasks
+curl http://localhost:5002/api/tasks/1
+
+curl "http://localhost:5002/api/tasks?status=TODO&sort=deadline"
+curl "http://localhost:5002/api/courses?per_page=3&page=1"
+curl http://localhost:5002/api/stats
 
 curl -X POST http://localhost:5002/api/tasks \
   -H "Content-Type: application/json" \
   -d '{"title":"Belajar Flask","deadline":"2026-10-20","priority":"HIGH"}'
 ```
 
+**Isi data contoh** (3 mata kuliah, 9 task, 3 catatan):
+
+```bash
+python3 backend/seed_test_data.py
+```
+
 ### Konsep yang Dipelajari di Semester 2
 
+**Fondasi (Tahap 1-2)**
+
 1. **Flask** — membuat server, route, dan request handler
-2. **REST API** — communicates antara frontend dan backend lewat HTTP
+2. **REST API** — komunikasi antara frontend dan backend lewat HTTP
 3. **JSON** — format pertukaran data (Python `dict` ↔ JavaScript `object`)
 4. **Parameterized Query** — mencegah SQL Injection (`?` placeholder)
 5. **Primary Key & AUTOINCREMENT** — identitas unik tiap baris
@@ -122,9 +207,47 @@ curl -X POST http://localhost:5002/api/tasks \
 8. **Async/Await mental model** — `fetch()` butuh waktu, data belum tersedia
    saat pertama dipanggil
 9. **Cache di memory** — hasil `fetch` disimpan sementara supaya kode
-  渲染 tidak harus async di mana-mana
+   render tidak harus async di mana-mana
 10. **Business Logic di server** — aturan bisnis (misal `COMPLETED` →
     `progress = 100`) ditulis di backend, bukan frontend
+
+**Tahap 3-4: query & modularisasi**
+
+11. **Dynamic WHERE** — filter disusun dari parameter user dengan
+    `?` placeholder, bukan input mentah
+12. **Whitelist sort** — nama kolom dari user dicocokkan ke dict
+    `SORT_EXPRESSIONS`; yang tidak ada di daftar tidak pernah masuk query
+13. **Blueprint** — memecah `app.py` monolitik jadi per fitur
+    (`routes/tasks.py`, `routes/courses.py`, ...)
+14. **Surgical refactor** — mengubah struktur tanpa mengubah perilaku
+
+**Tahap 5: relasi data**
+
+15. **Foreign Key** — `tasks.course_id` → `courses.id`
+16. **LEFT JOIN** — task tanpa mata kuliah tetap muncul, kolomnya `NULL`
+17. **ON DELETE SET NULL** — hapus mata kuliah tidak ikut menghapus task
+18. **Migration** — `migrations/001_*.sql` dicatat di `schema_migrations`
+    supaya tidak jalan dua kali
+19. **PRAGMA foreign_keys = ON** — SQLite tidak menegakkan FK secara default
+
+**Tahap 6-7: agregasi & pagination**
+
+20. **Aggregate function** — `COUNT`, `SUM`, `AVG`, `ROUND`
+21. **GROUP BY** — statistik per status, per prioritas, per mata kuliah
+22. **Calculated field** — `SUM(CASE WHEN status = 'COMPLETED' THEN 1 END)`
+23. **Pagination** — `LIMIT` + `OFFSET`, plus `total` dan `limit` di respons
+    supaya frontend tahu ada berapa halaman
+24. **Endpoint terpisah** — `/api/courses` (berhalaman) vs
+    `/api/courses/options` (semua, untuk dropdown)
+
+**Catatan kecil yang baruLearned saat Semester 2**
+
+- `NULL` dianggap lebih kecil dari tanggal manapun di SQLite, jadi
+  `ORDER BY deadline` menaruh task tanpa deadline paling atas.
+  Solusinya `COALESCE(deadline, '9999-12-31')` — contoh di `routes/tasks.py`.
+- Query `COALESCE` dengan alias harus dirujuk sebagai
+  `ORDER BY alias`, bukan mengulang ekspresinya, kalau nama kolomnya
+  berawalan `t.`.
 
 ### Contoh Alur Request
 
@@ -135,9 +258,9 @@ JavaScript: fetch('/api/tasks', { method: 'POST', body: {...} })
         ↓
 Browser mengirim HTTP request ke server
         ↓
-Flask menerima di route create_task()
+Flask menerima di routes/tasks.py -> create_task()
         ↓
-app.py menjalankan INSERT INTO tasks ... ? (query aman dari SQL Injection)
+Divalidasi, lalu INSERT INTO tasks ... ? (aman dari SQL Injection)
         ↓
 SQLite menyimpan data, db.commit()
         ↓
@@ -315,8 +438,8 @@ function getEffectiveStatus(task) {
 | Semester | Fokus | Status |
 |---|---|---|
 | **1** | HTML, Tailwind CSS, JavaScript, DOM, LocalStorage | ✅ Selesai |
-| **2** | Python, Flask, SQLite, REST API dasar | 🔜 |
-| **3** | REST API, PostgreSQL, Authentication | 🔜 |
+| **2** | Python, Flask, SQLite, Blueprint, FK, agregasi, pagination | ✅ Selesai |
+| **3** | PostgreSQL, Authentication, JWT | 🔜 |
 | **4** | Data Analytics, AI, Machine Learning | 🔜 |
 | **5** | Docker, Linux, Cloud, CI/CD | 🔜 |
 | **6** | Cybersecurity, Secure Architecture | 🔜 |
