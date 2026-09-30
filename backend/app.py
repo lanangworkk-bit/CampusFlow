@@ -17,6 +17,7 @@ from db import init_db, run_migrations
 from routes.courses import courses_bp
 from routes.main import main_bp
 from routes.notes import notes_bp
+from routes.stats import stats_bp
 from routes.tasks import tasks_bp
 
 app = Flask(
@@ -29,6 +30,7 @@ app.register_blueprint(main_bp)
 app.register_blueprint(tasks_bp)
 app.register_blueprint(notes_bp)
 app.register_blueprint(courses_bp)
+app.register_blueprint(stats_bp)
 
 if __name__ == '__main__':
     init_db()

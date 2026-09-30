@@ -170,7 +170,30 @@
 
             <!-- Analytics -->
             <section id="analytics" class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-sm">
-                <h2 class="font-bold mb-4">Analitik</h2>
+                <div class="flex items-center justify-between mb-4">
+                    <h2 class="font-bold">Analitik</h2>
+                    <p class="text-xs text-gray-400 dark:text-gray-500">Dihitung di server (SQLite)</p>
+                </div>
+
+                <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
+                    <div class="rounded-lg border border-gray-200 dark:border-gray-700 p-3">
+                        <p class="text-xs text-gray-500 dark:text-gray-400">Selesai</p>
+                        <p id="stat-card-completed" class="text-xl font-bold text-green-600 dark:text-green-400">0</p>
+                    </div>
+                    <div class="rounded-lg border border-gray-200 dark:border-gray-700 p-3">
+                        <p class="text-xs text-gray-500 dark:text-gray-400">Dikerjakan</p>
+                        <p id="stat-card-progress" class="text-xl font-bold text-blue-600 dark:text-blue-400">0</p>
+                    </div>
+                    <div class="rounded-lg border border-gray-200 dark:border-gray-700 p-3">
+                        <p class="text-xs text-gray-500 dark:text-gray-400">Jatuh tempo 7 hari</p>
+                        <p id="stat-card-week" class="text-xl font-bold text-orange-600 dark:text-orange-400">0</p>
+                    </div>
+                    <div class="rounded-lg border border-gray-200 dark:border-gray-700 p-3">
+                        <p class="text-xs text-gray-500 dark:text-gray-400">Tanpa deadline</p>
+                        <p id="stat-card-no-deadline" class="text-xl font-bold text-gray-500">0</p>
+                    </div>
+                </div>
+
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                         <p class="text-xs text-gray-500 dark:text-gray-400 mb-1">Task Completion Rate</p>
@@ -182,6 +205,21 @@
                     <div>
                         <p class="text-xs text-gray-500 dark:text-gray-400 mb-1">Tugas per Prioritas</p>
                         <ul id="priority-breakdown" class="text-sm space-y-1"></ul>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 mt-5">
+                    <div>
+                        <p class="text-xs text-gray-500 dark:text-gray-400 mb-1">Beban per Mata Kuliah</p>
+                        <ul id="course-breakdown" class="text-sm space-y-2"></ul>
+                    </div>
+                    <div>
+                        <p class="text-xs text-gray-500 dark:text-gray-400 mb-1">Deadline Terdekat</p>
+                        <ul id="upcoming-list" class="text-sm space-y-1"></ul>
+                    </div>
+                    <div>
+                        <p class="text-xs text-gray-500 dark:text-gray-400 mb-1">Paling Lama Belum Selesai</p>
+                        <ul id="stuck-list" class="text-sm space-y-1"></ul>
                     </div>
                 </div>
             </section>

@@ -382,7 +382,8 @@ function refreshFromServer() {
       cachedTasks = tasks.map(normalizeTask);
       renderTasks();
       renderStats();
-      renderAnalytics();
+      // Statistik ikut difilter server, jadi harus ambil ulang.
+      loadStats();
     })
     .catch(handleApiError);
 }
@@ -559,12 +560,11 @@ function updateProgress(id, value) {
   if (label) label.textContent = task.progress + "%";
 
   renderStats();
-  renderAnalytics();
 
-  // Kirim ke server (tanpa render ulang list)
-  apiUpdateTask(id, { progress: task.progress, status: task.status }).catch(
-    handleApiError,
-  );
+  // Kirim ke server, lalu ambil statistik terbaru.
+  apiUpdateTask(id, { progress: task.progress, status: task.status })
+    .then(loadStats)
+    .catch(handleApiError);
 }
 
 function deleteTask(id) {
@@ -695,27 +695,48 @@ function renderStats() {
   document.getElementById("stat-overdue").textContent = overdue;
 }
 
+// Statistik dihitung di server (SQLite), bukan di browser.
+// Database yang punya COUNT, SUM, dan GROUP BY-nya.
+let cachedStats = null;
+
+function loadStats() {
+  return api("/api/stats")
+    .then(function (stats) {
+      cachedStats = stats;
+      renderAnalytics();
+    })
+    .catch(handleApiError);
+}
+
 function renderAnalytics() {
-  const tasks = getTasks();
+  const stats = cachedStats;
+  if (!stats) return;
 
-  const completed = tasks.filter(function (t) {
-    return getEffectiveStatus(t) === "COMPLETED";
-  }).length;
+  const summary = stats.summary;
 
-  const rate =
-    tasks.length === 0 ? 0 : Math.round((completed / tasks.length) * 100);
+  document.getElementById("stat-card-completed").textContent =
+    summary.completed;
+  document.getElementById("stat-card-progress").textContent =
+    summary.in_progress;
+  document.getElementById("stat-card-week").textContent = summary.due_this_week;
+  document.getElementById("stat-card-no-deadline").textContent =
+    summary.no_deadline;
 
+  const rate = stats.completion_rate;
   document.getElementById("completion-bar").style.width = rate + "%";
-  document.getElementById("completion-label").textContent = rate + "%";
+  document.getElementById("completion-label").textContent =
+    rate + "% (" + summary.completed + " dari " + summary.total + ")";
+
+  // --- Tugas per prioritas ---
+  const byPriority = {};
+  stats.by_priority.forEach(function (row) {
+    byPriority[row.priority] = row.total;
+  });
 
   const breakdown = document.getElementById("priority-breakdown");
   breakdown.innerHTML = "";
-
   PRIORITIES.forEach(function (priority) {
-    const count = tasks.filter(function (t) {
-      return t.priority === priority;
-    }).length;
-
+    const count = byPriority[priority] || 0;
     const li = document.createElement("li");
     li.className = "flex justify-between";
     li.innerHTML = `
@@ -727,6 +748,75 @@ function renderAnalytics() {
         `;
     breakdown.appendChild(li);
   });
+
+  // --- Beban per mata kuliah ---
+  const courseList = document.getElementById("course-breakdown");
+  courseList.innerHTML = "";
+  if (stats.by_course.length === 0) {
+    courseList.innerHTML =
+      '<li class="text-xs text-gray-400">Belum ada mata kuliah.</li>';
+  } else {
+    stats.by_course.forEach(function (row) {
+      const max = Math.max.apply(
+        null,
+        stats.by_course.map(function (c) {
+          return c.total;
+        }),
+      );
+      // Persentase lebar bar, minimal 4% supaya bar tetap terlihat
+      // walau jumlahnya cuma 1.
+      const width = max > 0 ? Math.max(4, (row.total / max) * 100) : 0;
+      const done = row.total > 0 ? Math.round((row.completed / row.total) * 100) : 0;
+
+      const li = document.createElement("li");
+      li.innerHTML = `
+        <div class="flex justify-between text-xs mb-1">
+          <span>${escapeHTML(row.name)}</span>
+          <span class="font-medium">${row.total} tugas${row.total > 0 ? " · " + done + "% selesai" : ""}</span>
+        </div>
+        <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1.5 overflow-hidden">
+          <div class="bg-indigo-500 h-full rounded-full" style="width: ${width}%"></div>
+        </div>
+      `;
+      courseList.appendChild(li);
+    });
+  }
+
+  // --- Deadline terdekat ---
+  const upcoming = document.getElementById("upcoming-list");
+  upcoming.innerHTML = "";
+  if (stats.upcoming.length === 0) {
+    upcoming.innerHTML =
+      '<li class="text-xs text-gray-400">Tidak ada deadline terdekat.</li>';
+  } else {
+    stats.upcoming.forEach(function (task) {
+      const li = document.createElement("li");
+      li.className = "flex justify-between text-xs border-b border-gray-100 dark:border-gray-700 py-1";
+      li.innerHTML = `
+        <span class="truncate pr-2">${escapeHTML(task.title)}</span>
+        <span class="text-gray-500 dark:text-gray-400 shrink-0">${escapeHTML(formatDeadline(task.deadline))}</span>
+      `;
+      upcoming.appendChild(li);
+    });
+  }
+
+  // --- Paling lama belum selesai ---
+  const stuck = document.getElementById("stuck-list");
+  stuck.innerHTML = "";
+  if (stats.stuck.length === 0) {
+    stuck.innerHTML =
+      '<li class="text-xs text-gray-400">Semua tugas sudah selesai.</li>';
+  } else {
+    stats.stuck.forEach(function (task) {
+      const li = document.createElement("li");
+      li.className = "flex justify-between text-xs border-b border-gray-100 dark:border-gray-700 py-1";
+      li.innerHTML = `
+        <span class="truncate pr-2">${escapeHTML(task.title)}</span>
+        <span class="text-gray-500 dark:text-gray-400 shrink-0">${task.progress}%</span>
+      `;
+      stuck.appendChild(li);
+    });
+  }
 }
 
 // --------------------------------------------
@@ -1142,10 +1232,11 @@ function init() {
     .then(function () {
       renderTasks();
       renderStats();
-      renderAnalytics();
       renderCourses();
       renderNotes();
       renderCalendar();
+      // Statistik dihitung server, jadi paling akhir diambil.
+      return loadStats();
     })
     .catch(handleApiError);
 }
