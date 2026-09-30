@@ -1,66 +1,271 @@
-"""CampusFlow - Server Flask (Semester 2).
+"""CampusFlow - aplikasi Flask.
 
-File ini hanya bertugas:
-  1. membuat objek Flask
-  2. mendaftarkan setiap Blueprint
-  3. menjalankan server
+Jalankan:
+    python3 -m backend.app
 
-Semua logika bisnis ada di db.py dan routes/.
-
-Jalankan dengan:
-    python backend/app.py
+atau:
+    gunicorn 'backend.app:create_app()'
 """
 
-from flask import Flask, jsonify, request
+import os
+import sys
+import time
 
-from db import init_db, run_migrations
-from routes.courses import courses_bp
-from routes.main import main_bp
-from routes.notes import notes_bp
-from routes.stats import stats_bp
-from routes.tasks import tasks_bp
+from flask import Flask, jsonify, render_template, request
 
-app = Flask(
-    __name__,
-    template_folder='../templates',
-    static_folder='../static',
+# Path supaya modul bisa diimpor baik lewat `python3 backend/app.py`
+# maupun `gunicorn backend.app:create_app()`.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from backend.config import ProductionConfig, get_config  # noqa: E402
+from backend.extensions import cors, db, jwt, limiter, migrate  # noqa: E402
+from backend.routes.analytics import analytics_bp, system_bp  # noqa: E402
+from backend.routes.auth import auth_bp  # noqa: E402
+from backend.routes.resources import resources_bp  # noqa: E402
+from backend.services.optimize import (  # noqa: E402
+    attach_query_optimizer,
+    create_performance_indexes,
 )
-
-app.register_blueprint(main_bp)
-app.register_blueprint(tasks_bp)
-app.register_blueprint(notes_bp)
-app.register_blueprint(courses_bp)
-app.register_blueprint(stats_bp)
+from backend.services.security import security_headers  # noqa: E402
 
 
-@app.errorhandler(404)
-def handle_not_found(error):
-    """Balas JSON untuk request API, halaman HTML untuk browser.
+def create_app(config_name=None):
+    # config_name bisa berupa string ('testing') atau objek config.
+    if isinstance(config_name, str):
+        from backend.config import CONFIGS
 
-    Tanpa ini, user yang salah ketik URL /api/tasks/typo akan
-    melihat halaman error HTML instead of JSON, dan JavaScript
-    akan gagal parse-nya dengan pesan yang membingungkan.
+        config_name = CONFIGS[config_name]
+
+    app = Flask(
+        __name__,
+        template_folder=os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), '..', 'templates'
+        ),
+        static_folder=os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), '..', 'static'
+        ),
+    )
+    app.config.from_object(config_name or get_config())
+
+    _register_pages(app)
+    _init_extensions(app)
+    _register_blueprints(app)
+    _register_error_handlers(app)
+    _register_hooks(app)
+    _register_cli(app)
+
+    # Semua model harus sudah ter-import sebelum create_all() dipanggil,
+    # supaya SQLAlchemy tahu tabel mana yang perlu dibuat. Import-nya
+    # diletakkan di dalam fungsi supaya tidak ada circular import.
+    with app.app_context():
+        from backend.models import AuditLog, Course, Note, Task, User  # noqa: F401
+
+        db.create_all()
+
+    # Index tambahan dan penghitung query. Index memakai
+    # CREATE INDEX IF NOT EXISTS, jadi aman dipanggil berulang.
+    if not app.config.get('TESTING'):
+        attach_query_optimizer(app)
+    else:
+        # Test tetap butuh index yang sama supaya test performa
+        # benar-benar menguji kondisi production.
+        with app.app_context():
+            create_performance_indexes(app)
+
+    return app
+
+
+def _register_pages(app):
+    """Halaman HTML.
+
+    Daftarkan lewat fungsi, bukan di modul level. Kalau ditulis di
+    modul level, route-nya hanya menempel ke satu objek app, dan
+    app yang dibuat create_app() di tempat lain (test, gunicorn)
+    tidak punya halaman ini sama sekali.
     """
-    if request.path.startswith('/api/'):
-        return jsonify({'error': 'Endpoint not found'}), 404
-    return jsonify({'error': 'Page not found'}), 404
+
+    @app.route('/')
+    def index():
+        return render_template('index.html')
+
+    @app.route('/healthz')
+    def healthz():
+        """Alias health check untuk platform yang memanggil /healthz."""
+        return jsonify({'status': 'ok'})
 
 
-@app.errorhandler(405)
-def handle_method_not_allowed(error):
-    if request.path.startswith('/api/'):
-        return jsonify({'error': 'Method not allowed'}), 405
-    return jsonify({'error': 'Method not allowed'}), 405
+def _init_extensions(app):
+    db.init_app(app)
+    migrate.init_app(app, db)
+    jwt.init_app(app)
+    cors.init_app(
+        app,
+        resources={r'/api/*': {'origins': app.config['CORS_ORIGINS']}},
+    )
+    limiter.init_app(app)
+
+    @jwt.unauthorized_loader
+    def missing_token(reason):
+        return jsonify({'error': 'Token tidak ada. Silakan login.'}), 401
+
+    @jwt.invalid_token_loader
+    def invalid_token(reason):
+        return jsonify({'error': 'Token tidak valid'}), 401
+
+    @jwt.expired_token_loader
+    def expired_token(jwt_header, jwt_payload):
+        return jsonify({'error': 'Token kedaluwarsa, silakan login lagi'}), 401
+
+    @jwt.revoked_token_loader
+    def revoked_token(jwt_header, jwt_payload):
+        return jsonify({'error': 'Token sudah dicabut'}), 401
+
+    @jwt.needs_fresh_token_loader
+    def needs_fresh(jwt_header, jwt_payload):
+        return jsonify({'error': 'Token lama, silakan login ulang'}), 401
+
+    @jwt.additional_claims_loader
+    def add_claims(identity):
+        from backend.models import User
+
+        user = db.session.get(User, int(identity)) if identity else None
+        if user is None:
+            return {}
+        return {'role': user.role, 'username': user.username}
 
 
-@app.errorhandler(500)
-def handle_server_error(error):
-    if request.path.startswith('/api/'):
-        return jsonify({'error': 'Internal server error'}), 500
-    return jsonify({'error': 'Internal server error'}), 500
+def _register_blueprints(app):
+    app.register_blueprint(auth_bp)
+    app.register_blueprint(resources_bp)
+    app.register_blueprint(analytics_bp)
+    app.register_blueprint(system_bp)
+
+
+def _register_error_handlers(app):
+    def wants_json():
+        return (
+            request.path.startswith('/api/')
+            or request.accept_mimetypes.best == 'application/json'
+        )
+
+    @app.errorhandler(400)
+    def bad_request(error):
+        return jsonify({'error': 'Permintaan tidak valid'}), 400
+
+    @app.errorhandler(404)
+    def not_found(error):
+        if wants_json():
+            return jsonify({'error': 'Endpoint tidak ditemukan'}), 404
+        return render_template('404.html'), 404
+
+    @app.errorhandler(405)
+    def method_not_allowed(error):
+        return jsonify({'error': 'Metode tidak diizinkan'}), 405
+
+    @app.errorhandler(413)
+    def too_large(error):
+        return jsonify({'error': 'Data terlalu besar'}), 413
+
+    @app.errorhandler(415)
+    def unsupported_media(error):
+        return jsonify({'error': 'Harus berupa JSON'}), 415
+
+    @app.errorhandler(429)
+    def rate_limited(error):
+        return jsonify({
+            'error': 'Terlalu banyak permintaan. Coba lagi nanti.'
+        }), 429
+
+    @app.errorhandler(500)
+    def server_error(error):
+        db.session.rollback()
+        if wants_json():
+            return jsonify({'error': 'Terjadi kesalahan di server'}), 500
+        return render_template('500.html'), 500
+
+
+def _register_hooks(app):
+    @app.after_request
+    def after(response):
+        return security_headers(response)
+
+    @app.before_request
+    def track_request():
+        from flask import g
+
+        g.start_time = time.perf_counter()
+
+    @app.teardown_appcontext
+    def cleanup(exception=None):
+        if exception is not None:
+            db.session.rollback()
+
+
+def _register_cli(app):
+    import click
+
+    @app.cli.command('init-db')
+    def init_db():
+        """Buat semua tabel."""
+        db.create_all()
+        click.echo('Tabel dibuat.')
+
+    @app.cli.command('seed')
+    @click.option('--admin', is_flag=True, help='Buat juga akun admin')
+    def seed(admin):
+        """Isi data contoh."""
+        from backend.seed_data import run_seed
+
+        run_seed(admin=admin)
+
+    @app.cli.command('create-user')
+    @click.argument('username')
+    @click.argument('password')
+    @click.option('--email', default=None)
+    @click.option('--role', default='student')
+    def create_user(username, password, email, role):
+        """Buat satu user baru."""
+        from backend.models import User
+
+        if User.query.filter_by(username=username.lower()).first():
+            click.echo('Username sudah ada.')
+            return
+        user = User(
+            username=username.lower(),
+            email=email or f'{username.lower()}@campusflow.id',
+            role=role,
+        )
+        user.set_password(password)
+        db.session.add(user)
+        db.session.commit()
+        click.echo(f'User {user.username} dibuat dengan role {user.role}.')
+
+    @app.cli.command('check')
+    def check():
+        """Periksa konfigurasi dan koneksi database."""
+        from sqlalchemy import text
+
+        click.echo(f'Environment : {os.environ.get("FLASK_ENV", "development")}')
+        click.echo(f'Database    : {app.config["SQLALCHEMY_DATABASE_URI"][:60]}')
+        try:
+            db.session.execute(text('SELECT 1'))
+            click.echo('Database    : OK')
+        except Exception as error:
+            click.echo(f'Database    : GAGAL - {error}')
+        if app.config.get('DEBUG') is False:
+            problems = ProductionConfig.validate()
+            for problem in problems:
+                click.echo(f'PERINGATAN: {problem}')
+
+
+# Instance default, dipakai oleh `python3 -m backend.app` dan gunicorn.
+# Test dan skrip lain sebaiknya memanggil create_app() sendiri.
+app = create_app()
 
 
 if __name__ == '__main__':
-    init_db()
-    run_migrations()
-    app.run(debug=True, use_reloader=False, port=5002)
+    port = int(os.environ.get('PORT', 5002))
+    debug = os.environ.get('FLASK_DEBUG', '1') == '1'
+    print(f'  CampusFlow -> http://localhost:{port}')
+    print(f'  Health     -> http://localhost:{port}/api/health')
+    app.run(host='0.0.0.0', port=port, debug=debug, use_reloader=debug)

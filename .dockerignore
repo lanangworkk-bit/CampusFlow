@@ -1,0 +1,36 @@
+.git/
+.github/
+venv/
+env/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Jangan kirim database atau secret ke dalam image.
+*.db
+*.sqlite
+*.sqlite3
+database/
+.env
+.env.*
+!.env.example
+
+# Log, cache, coverage
+*.log
+.cache/
+htmlcov/
+.coverage
+coverage.xml
+
+# Editor & OS
+.vscode/
+.idea/
+.DS_Store
+*.swp
+
+# Dokumen yang tidak dipakai runtime
+README.md
+LICENSE
+tests/

@@ -1,0 +1,77 @@
+# syntax=docker/dockerfile:1
+# ===================================================================
+# CampusFlow - multi-stage build
+# ===================================================================
+# Dipisah jadi beberapa tahap supaya:
+#   - image akhir tidak ikut membawa compiler dan file sumber
+#   - dependency dibangun sekali, dipakai ulang di tahap berikutnya
+#   - container menjalankan user non-root
+
+# ---------- Tahap 1: build dependency ----------
+FROM python:3.12-slim AS builder
+
+ENV PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+WORKDIR /build
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends build-essential libpq-dev \
+ && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt .
+
+# Wheel di-build di sini supaya tahap runtime tidak butuh compiler.
+RUN pip wheel --wheel-dir /wheels -r requirements.txt
+
+
+# ---------- Tahap 2: runtime ----------
+FROM python:3.12-slim AS runtime
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    FLASK_ENV=production \
+    PORT=8000
+
+# libpq5 saja (runtime), bukan build-essential. Image jadi jauh lebih kecil.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends libpq5 curl \
+ && rm -rf /var/lib/apt/lists/*
+
+# User non-root: kalau container berhasil ditembus, attacker tidak
+# langsung dapat akses root di dalam container.
+RUN groupadd -r appuser && useradd -r -g appuser appuser
+
+WORKDIR /app
+
+COPY --from=builder /wheels /wheels
+COPY requirements.txt .
+
+RUN pip install --no-index --find-links=/wheels -r requirements.txt \
+ && rm -rf /wheels
+
+COPY --chown=appuser:appuser . .
+
+RUN mkdir -p /app/database && chown appuser:appuser /app/database
+
+USER appuser
+
+EXPOSE 8000
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+    CMD curl -fsS http://localhost:8000/api/health || exit 1
+
+# Gunicorn dengan 3 worker. Jumlah worker choked jumlah CPU.
+# --preload memuat aplikasi sekali sebelum worker mulai,
+# supaya RAM tidak dipakai berulang kali.
+CMD ["gunicorn", \
+     "--bind", "0.0.0.0:8000", \
+     "--workers", "3", \
+     "--threads", "2", \
+     "--timeout", "60", \
+     "--graceful-timeout", "30", \
+     "--preload", \
+     "--access-logfile", "-", \
+     "--error-logfile", "-", \
+     "backend.app:app"]

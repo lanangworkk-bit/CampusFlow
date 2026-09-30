@@ -1,0 +1,44 @@
+# ===================================================================
+# CampusFlow - konfigurasi production
+# ===================================================================
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# Bedanya dari compose biasa:
+#   - tidak ada port database yang terbuka ke host
+#   - memakai env_file sehingga semua secret di luar repo
+#   - ada batas resource supaya satu container tidak bisa memakan
+#     seluruh RAM server
+# ===================================================================
+
+services:
+  web:
+    env_file:
+      - .env
+    environment:
+      FLASK_ENV: production
+      FLASK_DEBUG: "0"
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          memory: 128M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  db:
+    # Di production, database tidak perlu port terbuka ke host sama sekali.
+    # Akses hanya dari network internal compose.
+    ports: []
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./backups:/backups
+    command: >
+      postgres -c max_connections=100
+               -c shared_buffers=256MB
+               -c work_mem=8MB

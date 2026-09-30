@@ -1,13 +1,39 @@
-# macOS
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environment
+venv/
+env/
+ENV/
+
+# Database (jangan pernah commit data user)
+*.db
+*.sqlite
+*.sqlite3
+database/
+
+# Environment variables (berisi secret!)
+.env
+.env.*
+!.env.example
+
+# Log & cache
+*.log
+.cache/
+htmlcov/
+.coverage
+coverage.xml
+
+# OS
 .DS_Store
+Thumbs.db
 
 # Editor
 .vscode/
 .idea/
-
-# Python (untuk branch flask-backend)
-__pycache__/
-*.py[cod]
-venv/
-*.db
-*.log
+*.swp

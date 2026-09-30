@@ -1,285 +1,198 @@
 <!DOCTYPE html>
-<html lang="id" class="scroll-smooth">
+<html lang="id" data-theme="light">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="CampusFlow - One Place for Your College Life">
-    <title>CampusFlow - Dashboard</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-        tailwind.config = {
-            darkMode: 'class',
-        }
-    </script>
+    <title>CampusFlow</title>
+    <meta name="description" content="Kelola tugas kuliah, mata kuliah, dan catatan dalam satu tempat.">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
-<body class="min-h-screen bg-gray-50 text-gray-900 dark:bg-gray-900 dark:text-gray-100 transition-colors">
+<body>
 
-    <!-- Mobile Menu Toggle -->
-    <button id="mobile-menu-btn" class="fixed top-4 left-4 z-50 md:hidden bg-white dark:bg-gray-800 p-2 rounded-lg shadow" aria-label="Buka menu">
-        <svg class="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/>
-        </svg>
-    </button>
+<!-- ====================== LOGIN / REGISTER ====================== -->
+<section id="auth" class="auth-wrap">
+    <div class="auth-card">
+        <h1 class="brand">Campus<span>Flow</span></h1>
+        <p class="muted center">Kelola tugas kuliah tanpa ribet.</p>
 
-    <div class="max-w-7xl mx-auto p-4 flex gap-6 items-start">
+        <div class="tabs">
+            <button data-auth-tab="login" class="active">Masuk</button>
+            <button data-auth-tab="register">Daftar</button>
+        </div>
 
-        <!-- Sidebar -->
-        <aside id="sidebar" class="sidebar w-64 shrink-0 bg-white dark:bg-gray-800 shadow rounded-lg sticky top-4 p-0 overflow-hidden">
-            <div class="p-6 border-b border-gray-200 dark:border-gray-700">
-                <h1 class="text-xl font-bold">CampusFlow</h1>
-                <p class="text-sm text-gray-500 dark:text-gray-400">One Place for Your College Life.</p>
-            </div>
-            <nav class="p-4">
-                <ul class="space-y-1" id="nav-list">
-                    <li><a href="#dashboard" class="nav-link active block px-3 py-2 rounded text-sm font-medium">Dashboard</a></li>
-                    <li><a href="#tasks" class="nav-link block px-3 py-2 rounded text-sm">Tasks</a></li>
-                    <li><a href="#courses" class="nav-link block px-3 py-2 rounded text-sm">Courses</a></li>
-                    <li><a href="#calendar" class="nav-link block px-3 py-2 rounded text-sm">Calendar</a></li>
-                    <li><a href="#notes" class="nav-link block px-3 py-2 rounded text-sm">Notes</a></li>
-                    <li><a href="#analytics" class="nav-link block px-3 py-2 rounded text-sm">Analytics</a></li>
-                    <li><a href="#settings" class="nav-link block px-3 py-2 rounded text-sm">Settings</a></li>
-                </ul>
-            </nav>
-        </aside>
+        <p id="authError" class="error-box" role="alert" aria-live="polite"></p>
 
-        <!-- Main Content -->
-        <main class="flex-1 min-w-0 space-y-6" id="main-content">
+        <div id="loginPanel">
+            <form id="loginForm">
+                <label for="loginUsername">Username atau email</label>
+                <input id="loginUsername" name="username" autocomplete="username" required>
 
-            <!-- Header -->
-            <header class="flex items-center justify-between">
-                <div>
-                    <p class="text-lg font-medium" id="greeting">Good evening, Lanang</p>
-                    <p class="text-sm text-gray-500 dark:text-gray-400" id="today-date"></p>
-                </div>
-                <button id="theme-toggle" class="p-2 rounded-lg bg-white dark:bg-gray-800 shadow hover:bg-gray-100 dark:hover:bg-gray-700" aria-label="Toggle tema">
-                    <svg class="h-5 w-5 hidden dark:block" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.36 6.36l-.7-.7M6.34 6.34l-.7-.7m12.72 0l-.7.7M6.34 17.66l-.7.7M16 12a4 4 0 11-8 0 4 4 0 018 0z"/>
-                    </svg>
-                    <svg class="h-5 w-5 dark:hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 14a9.003 9.003 0 008.354-5.646z"/>
-                    </svg>
-                </button>
-            </header>
+                <label for="loginPassword">Password</label>
+                <input id="loginPassword" name="password" type="password"
+                       autocomplete="current-password" required>
 
-            <!-- Statistics Cards -->
-            <section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4" aria-label="Statistik">
-                <div class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm">
-                    <p class="text-xs text-gray-500 dark:text-gray-400">Total Tugas</p>
-                    <p class="text-2xl font-bold" id="stat-total">0</p>
-                </div>
-                <div class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm">
-                    <p class="text-xs text-gray-500 dark:text-gray-400">Selesai</p>
-                    <p class="text-2xl font-bold text-green-600" id="stat-completed">0</p>
-                </div>
-                <div class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm">
-                    <p class="text-xs text-gray-500 dark:text-gray-400">Pending</p>
-                    <p class="text-2xl font-bold text-yellow-600" id="stat-pending">0</p>
-                </div>
-                <div class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm">
-                    <p class="text-xs text-gray-500 dark:text-gray-400">Overdue</p>
-                    <p class="text-2xl font-bold text-red-600" id="stat-overdue">0</p>
-                </div>
-            </section>
+                <button class="btn-primary" type="submit">Masuk</button>
+            </form>
+            <p class="muted center small">
+                Coba akun demo: <code>demo</code> / <code>demo1234</code>
+            </p>
+        </div>
 
-            <!-- Add Task Form -->
-            <section class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-sm">
-                <h2 class="font-bold mb-4">Tambah Tugas</h2>
-                <form id="task-form" class="grid grid-cols-1 md:grid-cols-5 gap-3">
-                    <input type="text" id="task-title" placeholder="Judul tugas" aria-label="Judul tugas" class="input">
-                    <input type="text" id="task-description" placeholder="Deskripsi" aria-label="Deskripsi" class="input">
-                    <input type="date" id="task-deadline" aria-label="Deadline" class="input">
-                    <select id="task-priority" aria-label="Prioritas" class="input">
-                        <option value="LOW">LOW</option>
-                        <option value="MEDIUM" selected>MEDIUM</option>
-                        <option value="HIGH">HIGH</option>
-                        <option value="URGENT">URGENT</option>
-                    </select>
-                    <select id="task-course" aria-label="Mata kuliah" class="input">
-                        <option value="">Tanpa mata kuliah</option>
-                    </select>
-                    <div class="md:col-span-5 flex items-center gap-3">
-                        <button type="submit" class="btn-primary">Simpan Tugas</button>
-                        <p id="form-error" class="text-sm text-red-500" role="alert"></p>
-                    </div>
-                </form>
-            </section>
+        <div id="registerPanel" class="hidden">
+            <form id="registerForm">
+                <label for="regName">Nama lengkap</label>
+                <input id="regName" name="full_name" autocomplete="name">
 
-            <!-- Task List with Filter -->
-            <section id="tasks" class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-sm">
-                <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
-                    <h2 class="font-bold">Daftar Tugas</h2>
-                    <div class="flex gap-2">
-                        <input type="search" id="task-search" placeholder="Cari tugas..." aria-label="Cari tugas" class="input w-40">
-                        <select id="filter-priority" aria-label="Filter prioritas" class="input w-32">
-                            <option value="all">Semua Prioritas</option>
-                            <option value="LOW">LOW</option>
-                            <option value="MEDIUM">MEDIUM</option>
-                            <option value="HIGH">HIGH</option>
-                            <option value="URGENT">URGENT</option>
-                        </select>
-                        <select id="filter-status" aria-label="Filter status" class="input w-32">
-                            <option value="all">Semua Status</option>
-                            <option value="TODO">TODO</option>
-                            <option value="IN PROGRESS">IN PROGRESS</option>
-                            <option value="COMPLETED">COMPLETED</option>
-                            <option value="OVERDUE">OVERDUE</option>
-                        </select>
-                        <select id="sort-by" aria-label="Urutkan berdasarkan" class="input w-40">
-                            <option value="deadline">Deadline</option>
-                            <option value="title">Judul</option>
-                            <option value="priority">Prioritas</option>
-                            <option value="status">Status</option>
-                            <option value="created_at">Tanggal dibuat</option>
-                        </select>
-                        <button id="sort-order" type="button" aria-label="Balik urutan" title="Balik urutan" class="input w-12">↑</button>
-                    </div>
-                </div>
-                <div id="task-list" class="space-y-3" aria-live="polite"></div>
-            </section>
+                <label for="regUsername">Username</label>
+                <input id="regUsername" name="username" autocomplete="username" required
+                       pattern="[a-zA-Z0-9_]{3,30}"
+                       title="3-30 karakter: huruf, angka, underscore">
 
-            <!-- Course List -->
-            <section id="courses" class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-sm">
-                <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
-                    <h2 class="font-bold">Mata Kuliah</h2>
-                    <div class="flex gap-2">
-                        <input type="search" id="course-search" placeholder="Cari mata kuliah..." aria-label="Cari mata kuliah" class="input w-48">
-                        <select id="course-sort" aria-label="Urutkan mata kuliah" class="input w-40">
-                            <option value="name">Nama</option>
-                            <option value="code">Kode</option>
-                            <option value="sks">SKS</option>
-                            <option value="day">Hari</option>
-                        </select>
-                        <select id="course-order" aria-label="Arah urutan" class="input w-16">
-                            <option value="asc">A-Z</option>
-                            <option value="desc">Z-A</option>
-                        </select>
-                    </div>
-                </div>
-                <div id="course-list" class="grid grid-cols-1 sm:grid-cols-2 gap-3" aria-live="polite"></div>
-                <div id="course-pagination" class="flex items-center justify-between mt-4"></div>
-            </section>
+                <label for="regEmail">Email</label>
+                <input id="regEmail" name="email" type="email" autocomplete="email" required>
 
-            <!-- Calendar -->
-            <section id="calendar" class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-sm">
-                <h2 class="font-bold mb-4">Kalender</h2>
-                <div class="flex items-center justify-between mb-4">
-                    <button id="calendar-prev" class="btn-secondary" aria-label="Bulan sebelumnya">&larr;</button>
-                    <span id="calendar-title" class="font-medium"></span>
-                    <button id="calendar-next" class="btn-secondary" aria-label="Bulan berikutnya">&rarr;</button>
-                </div>
-                <div class="grid grid-cols-7 gap-1 text-center text-xs text-gray-500 dark:text-gray-400 mb-2">
-                    <div>Min</div><div>Sen</div><div>Sel</div><div>Rab</div><div>Kam</div><div>Jum</div><div>Sab</div>
-                </div>
-                <div id="calendar-grid" class="grid grid-cols-7 gap-1 text-center text-sm"></div>
-            </section>
+                <label for="regPassword">Password (min. 8 karakter)</label>
+                <input id="regPassword" name="password" type="password"
+                       autocomplete="new-password" minlength="8" required>
 
-            <!-- Notes -->
-            <section id="notes" class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-sm">
-                <h2 class="font-bold mb-4">Catatan</h2>
-                <form id="note-form" class="flex gap-2 mb-4">
-                    <input type="text" id="note-text" placeholder="Tulis catatan..." aria-label="Catatan baru" class="input flex-1">
-                    <button type="submit" class="btn-primary">Simpan</button>
-                </form>
-                <ul id="note-list" class="space-y-2" aria-live="polite"></ul>
-            </section>
-
-            <!-- Analytics -->
-            <section id="analytics" class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-sm">
-                <div class="flex items-center justify-between mb-4">
-                    <h2 class="font-bold">Analitik</h2>
-                    <p class="text-xs text-gray-400 dark:text-gray-500">Dihitung di server (SQLite)</p>
-                </div>
-
-                <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
-                    <div class="rounded-lg border border-gray-200 dark:border-gray-700 p-3">
-                        <p class="text-xs text-gray-500 dark:text-gray-400">Selesai</p>
-                        <p id="stat-card-completed" class="text-xl font-bold text-green-600 dark:text-green-400">0</p>
-                    </div>
-                    <div class="rounded-lg border border-gray-200 dark:border-gray-700 p-3">
-                        <p class="text-xs text-gray-500 dark:text-gray-400">Dikerjakan</p>
-                        <p id="stat-card-progress" class="text-xl font-bold text-blue-600 dark:text-blue-400">0</p>
-                    </div>
-                    <div class="rounded-lg border border-gray-200 dark:border-gray-700 p-3">
-                        <p class="text-xs text-gray-500 dark:text-gray-400">Jatuh tempo 7 hari</p>
-                        <p id="stat-card-week" class="text-xl font-bold text-orange-600 dark:text-orange-400">0</p>
-                    </div>
-                    <div class="rounded-lg border border-gray-200 dark:border-gray-700 p-3">
-                        <p class="text-xs text-gray-500 dark:text-gray-400">Tanpa deadline</p>
-                        <p id="stat-card-no-deadline" class="text-xl font-bold text-gray-500">0</p>
-                    </div>
-                </div>
-
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                        <p class="text-xs text-gray-500 dark:text-gray-400 mb-1">Task Completion Rate</p>
-                        <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-4 overflow-hidden">
-                            <div id="completion-bar" class="bg-green-500 h-full rounded-full transition-all duration-300" style="width: 0%"></div>
-                        </div>
-                        <p class="text-xs text-gray-500 dark:text-gray-400 mt-1" id="completion-label">0%</p>
-                    </div>
-                    <div>
-                        <p class="text-xs text-gray-500 dark:text-gray-400 mb-1">Tugas per Prioritas</p>
-                        <ul id="priority-breakdown" class="text-sm space-y-1"></ul>
-                    </div>
-                </div>
-
-                <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 mt-5">
-                    <div>
-                        <p class="text-xs text-gray-500 dark:text-gray-400 mb-1">Beban per Mata Kuliah</p>
-                        <ul id="course-breakdown" class="text-sm space-y-2"></ul>
-                    </div>
-                    <div>
-                        <p class="text-xs text-gray-500 dark:text-gray-400 mb-1">Deadline Terdekat</p>
-                        <ul id="upcoming-list" class="text-sm space-y-1"></ul>
-                    </div>
-                    <div>
-                        <p class="text-xs text-gray-500 dark:text-gray-400 mb-1">Paling Lama Belum Selesai</p>
-                        <ul id="stuck-list" class="text-sm space-y-1"></ul>
-                    </div>
-                </div>
-            </section>
-
-            <!-- Settings -->
-            <section id="settings" class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-sm">
-                <h2 class="font-bold mb-4">Pengaturan</h2>
-                <div class="flex flex-wrap gap-3">
-                    <label class="flex items-center gap-2 text-sm">
-                        <input type="checkbox" id="setting-dark-mode"> Mode Gelap
-                    </label>
-                    <button id="reset-data" class="btn-danger">Reset Semua Data</button>
-                </div>
-            </section>
-
-        </main>
-    </div>
-
-    <!-- Edit Task Modal -->
-    <div id="edit-modal" class="fixed inset-0 bg-black/50 hidden items-center justify-center z-40 p-4" role="dialog" aria-modal="true" aria-labelledby="edit-modal-title">
-        <div class="bg-white dark:bg-gray-800 rounded-lg p-6 w-full max-w-md shadow-xl">
-            <h3 id="edit-modal-title" class="font-bold text-lg mb-4">Edit Tugas</h3>
-            <form id="edit-form" class="space-y-3">
-                <input type="hidden" id="edit-id">
-                <input type="text" id="edit-title" placeholder="Judul" aria-label="Judul" class="input w-full">
-                <input type="text" id="edit-description" placeholder="Deskripsi" aria-label="Deskripsi" class="input w-full">
-                <input type="date" id="edit-deadline" aria-label="Deadline" class="input w-full">
-                <select id="edit-priority" aria-label="Prioritas" class="input w-full">
-                    <option value="LOW">LOW</option>
-                    <option value="MEDIUM">MEDIUM</option>
-                    <option value="HIGH">HIGH</option>
-                    <option value="URGENT">URGENT</option>
-                </select>
-                <select id="edit-course" aria-label="Mata kuliah" class="input w-full">
-                    <option value="">Tanpa mata kuliah</option>
-                </select>
-                <div class="flex gap-2 justify-end">
-                    <button type="button" id="edit-cancel" class="btn-secondary">Batal</button>
-                    <button type="submit" class="btn-primary">Simpan</button>
-                </div>
+                <button class="btn-primary" type="submit">Buat akun</button>
             </form>
         </div>
     </div>
+</section>
 
-    <script src="{{ url_for('static', filename='script.js') }}"></script>
+<!-- ====================== APLIKASI ====================== -->
+<div id="app" class="hidden">
+
+    <header class="topbar">
+        <h1 class="brand">Campus<span>Flow</span></h1>
+        <div class="topbar-right">
+            <span id="currentUser" class="muted"></span>
+            <button id="themeToggle" class="btn-sm">Dark</button>
+            <button id="logoutBtn" class="btn-sm">Keluar</button>
+        </div>
+    </header>
+
+    <main class="container">
+
+        <!-- Statistik -->
+        <section class="panel">
+            <h2>Ringkasan</h2>
+            <div id="statsGrid" class="stats-grid"></div>
+        </section>
+
+        <!-- Insight -->
+        <section class="panel" id="insightPanel"></section>
+
+        <!-- Form task -->
+        <section class="panel">
+            <h2 id="taskFormTitle">Tambah Tugas</h2>
+            <form id="taskForm">
+                <div class="form-grid">
+                    <div class="span-2">
+                        <label for="taskTitle">Judul</label>
+                        <input id="taskTitle" required maxlength="200">
+                    </div>
+                    <div class="span-2">
+                        <label for="taskDescription">Deskripsi</label>
+                        <textarea id="taskDescription" rows="2" maxlength="5000"></textarea>
+                    </div>
+                    <div>
+                        <label for="taskDeadline">Tenggat</label>
+                        <input id="taskDeadline" type="date">
+                    </div>
+                    <div>
+                        <label for="taskPriority">Prioritas</label>
+                        <select id="taskPriority">
+                            <option value="LOW">Low</option>
+                            <option value="MEDIUM" selected>Medium</option>
+                            <option value="HIGH">High</option>
+                            <option value="URGENT">Urgent</option>
+                        </select>
+                    </div>
+                    <div class="span-2">
+                        <label for="taskCourse">Mata kuliah</label>
+                        <select id="taskCourse"></select>
+                    </div>
+                </div>
+                <div class="form-actions">
+                    <button id="taskSubmit" class="btn-primary" type="submit">Tambah</button>
+                    <button id="taskCancel" class="btn-sm hidden" type="button">Batal</button>
+                </div>
+            </form>
+        </section>
+
+        <!-- Daftar task -->
+        <section class="panel">
+            <div class="panel-head">
+                <h2>Daftar Tugas</h2>
+                <select id="sortSelect" class="small">
+                    <option value="deadline:asc">Tenggat (terdekat)</option>
+                    <option value="deadline:desc">Tenggat (terlama)</option>
+                    <option value="title:asc">Judul A-Z</option>
+                    <option value="title:desc">Judul Z-A</option>
+                    <option value="priority:asc">Prioritas</option>
+                    <option value="status:asc">Status</option>
+                    <option value="created_at:desc">Terbaru</option>
+                </select>
+            </div>
+
+            <div class="toolbar">
+                <input id="searchInput" type="search" placeholder="Cari tugas..." aria-label="Cari tugas">
+                <select id="priorityFilter" aria-label="Filter prioritas">
+                    <option value="">Semua prioritas</option>
+                    <option value="URGENT">Urgent</option>
+                    <option value="HIGH">High</option>
+                    <option value="MEDIUM">Medium</option>
+                    <option value="LOW">Low</option>
+                </select>
+                <select id="courseFilter" aria-label="Filter mata kuliah">
+                    <option value="">Semua mata kuliah</option>
+                </select>
+            </div>
+
+            <div class="chips">
+                <button data-filter="all" class="chip active">Semua</button>
+                <button data-filter="TODO" class="chip">Belum</button>
+                <button data-filter="IN PROGRESS" class="chip">Dikerjakan</button>
+                <button data-filter="COMPLETED" class="chip">Selesai</button>
+                <button data-filter="OVERDUE" class="chip">Terlambat</button>
+            </div>
+
+            <div id="taskList" class="list"></div>
+            <div id="taskPagination" class="pagination"></div>
+        </section>
+
+        <!-- Mata kuliah -->
+        <section class="panel">
+            <div class="panel-head">
+                <h2>Mata Kuliah</h2>
+                <select id="courseSortSelect" class="small">
+                    <option value="name:asc">Nama A-Z</option>
+                    <option value="name:desc">Nama Z-A</option>
+                    <option value="code:asc">Kode</option>
+                    <option value="sks:desc">SKS tertinggi</option>
+                </select>
+            </div>
+            <div id="courseList" class="course-grid"></div>
+            <div id="coursePagination" class="pagination"></div>
+        </section>
+
+        <!-- Catatan -->
+        <section class="panel">
+            <h2>Catatan</h2>
+            <form id="noteForm" class="note-form">
+                <input id="noteInput" placeholder="Tulis catatan..." maxlength="5000" required>
+                <button class="btn-primary" type="submit">Simpan</button>
+            </form>
+            <div id="noteList" class="note-grid"></div>
+        </section>
+
+    </main>
+</div>
+
+<div id="toasts" class="toasts" aria-live="polite"></div>
+
+<script src="{{ url_for('static', filename='script.js') }}"></script>
 </body>
 </html>

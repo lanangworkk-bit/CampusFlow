@@ -1,1378 +1,707 @@
-// ============================================
-// CampusFlow - Semester 2 Version
-// HTML + Tailwind CSS + JavaScript + Flask + SQLite
-// ============================================
+/* ===================================================================
+   CampusFlow - client side
+   ===================================================================
+   Aturan main di file ini:
+   1. Semua data dari server. LocalStorage hanya untuk preferensi
+      tampilan (dark mode), bukan untuk data tugas.
+   2. Setiap request ke server memakai token JWT.
+   3. Elemen HTML dibangun lewat textContent atau escapeHTML, bukan
+      disisipkan mentah lewat innerHTML.
+   =================================================================== */
 
-// --------------------------------------------
-// 1. API Layer (menggantikan LocalStorage)
-// --------------------------------------------
-// Data TIDAK lagi disimpan di browser.
-// Data diambil dari server lewat fetch() (HTTP request),
-// lalu disimpan sementara di memory (cache) supaya
-// kode di bawah tidak berubah banyak.
-//
-//   Browser  --fetch()-->  Flask  --sqlite3-->  database
-//
-// Catatan: darkMode tetap di LocalStorage karena itu
-// preferensi TAMPILAN per perangkat, bukan data.
+const API = '';
+const TOKEN_KEY = 'campusflow.token';
+const USER_KEY = 'campusflow.user';
+const THEME_KEY = 'campusflow.theme';
 
-// Cache di memory
-let cachedTasks = [];
-let cachedCourses = [];
-let cachedNotes = [];
-let cachedCourseOptions = [];
-let coursePage = { page: 1, total: 0, totalPages: 1, hasPrev: false, hasNext: false };
-let courseFilters = { search: "", sort: "name", order: "asc", perPage: 6 };
-let courseFilterTimer = null;
+// --------------------------------------------------------------- state
+const state = {
+    token: localStorage.getItem(TOKEN_KEY),
+    user: JSON.parse(localStorage.getItem(USER_KEY) || 'null'),
+    tasks: [],
+    courses: [],
+    courseOptions: [],
+    notes: [],
+    taskPage: 1,
+    coursePage: 1,
+    perPage: 10,
+    filters: { search: '', status: '', priority: '', courseId: '' },
+    sort: { key: 'deadline', order: 'asc' },
+    courseSort: { key: 'name', order: 'asc' },
+    stats: null,
+    currentFilter: 'all',
+};
 
-// Pengaman: kalau server error, jangan diamkan -
-// tampilkan pesannya supaya mudah di-debug.
-function handleApiError(error) {
-  console.error("API error:", error);
-  alert("Gagal terhubung ke server. Pastikan Flask berjalan di port 5002.");
+// --------------------------------------------------------------- util
+const $ = (sel) => document.querySelector(sel);
+const $$ = (sel) => Array.from(document.querySelectorAll(sel));
+
+/**
+ * Terapkan nilai yang butuh CSSOM: lebar progress bar dan warna aksen.
+ *
+ * Nilai-nilai ini sengaja tidak ditulis sebagai atribut style="..." di
+ * dalam HTML. Content-Security-Policy memakai style-src 'self' memblokir
+ * atribut style, jadi progress bar akan selalu tampil kosong. Mengatur
+ * element.style lewat JavaScript tidak diblokir CSP, jadi ini cara yang
+ * aman sekaligus jalan.
+ */
+function applyInlineStyles(root) {
+    root.querySelectorAll('[data-progress]').forEach((el) => {
+        const pct = Math.max(0, Math.min(100, Number(el.dataset.progress) || 0));
+        el.style.width = `${pct}%`;
+    });
+    root.querySelectorAll('[data-accent]').forEach((el) => {
+        el.style.setProperty('--accent', el.dataset.accent);
+    });
 }
 
-// Fungsi inti untuk semua request ke server.
-function api(url, options) {
-  return fetch(url, options).then(function (response) {
-    if (!response.ok) {
-      return response.json().then(function (data) {
-        throw new Error(data.error || "HTTP " + response.status);
-      });
+function escapeHTML(value) {
+    const div = document.createElement('div');
+    div.textContent = value == null ? '' : String(value);
+    return div.innerHTML;
+}
+
+function formatDate(iso) {
+    if (!iso) return '-';
+    const days = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun',
+        'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
+    const d = new Date(iso + 'T00:00:00');
+    if (Number.isNaN(d.getTime())) return iso;
+    return `${days[d.getDay()]}, ${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear()}`;
+}
+
+function daysLeft(iso) {
+    if (!iso) return null;
+    const target = new Date(iso + 'T00:00:00');
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+    return Math.round((target - now) / 86400000);
+}
+
+function deadlineLabel(iso) {
+    const left = daysLeft(iso);
+    if (left === null) return { text: 'Tanpa tenggat', cls: 'muted' };
+    if (left < 0) return { text: `Terlambat ${Math.abs(left)} hari`, cls: 'danger' };
+    if (left === 0) return { text: 'Hari ini', cls: 'danger' };
+    if (left === 1) return { text: 'Besok', cls: 'warn' };
+    if (left <= 3) return { text: `${left} hari lagi`, cls: 'warn' };
+    if (left <= 7) return { text: `${left} hari lagi`, cls: 'info' };
+    return { text: `${left} hari lagi`, cls: 'muted' };
+}
+
+function toast(message, type = 'info') {
+    const host = $('#toasts');
+    if (!host) return;
+    const el = document.createElement('div');
+    el.className = `toast toast-${type}`;
+    el.setAttribute('role', type === 'error' ? 'alert' : 'status');
+    el.textContent = message;
+    host.appendChild(el);
+    setTimeout(() => el.remove(), 4200);
+}
+
+// --------------------------------------------------------- networking
+async function api(path, options = {}) {
+    const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
+    if (state.token) headers.Authorization = `Bearer ${state.token}`;
+
+    let response;
+    try {
+        response = await fetch(API + path, { ...options, headers });
+    } catch (err) {
+        throw new Error('Tidak bisa menghubungi server. Coba jalankan ulang server.');
     }
-    return response.json();
-  });
+
+    if (response.status === 401) {
+        if (path.startsWith('/api/auth/')) {
+            const body = await response.json().catch(() => ({}));
+            throw new Error(body.error || 'Email atau password salah');
+        }
+        logout(true);
+        throw new Error('Sesi habis. Silakan login lagi.');
+    }
+
+    const body = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+        if (response.status === 429) {
+            throw new Error('Terlalu banyak permintaan. Tunggu sebentar.');
+        }
+        const err = new Error(body.error || `Error ${response.status}`);
+        err.status = response.status;
+        err.field = body.details && body.details.field;
+        throw err;
+    }
+
+    return body;
 }
 
-// Server pakai snake_case (created_at),
-// frontend lebih nyaman pakai camelCase (createdAt).
-function normalizeTask(task) {
-  return {
-    id: task.id,
-    title: task.title,
-    description: task.description || "",
-    deadline: task.deadline || "",
-    priority: task.priority,
-    status: task.status,
-    progress: task.progress,
-    courseId: task.course_id || null,
-    courseName: task.course_name || "",
-    createdAt: task.created_at,
-  };
+// ------------------------------------------------------------- theme
+function applyTheme(theme) {
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem(THEME_KEY, theme);
+    const btn = $('#themeToggle');
+    if (btn) btn.textContent = theme === 'dark' ? 'Light' : 'Dark';
 }
 
-function normalizeNote(note) {
-  return {
-    id: note.id,
-    text: note.text,
-    createdAt: new Date(note.created_at).toLocaleDateString("id-ID"),
-  };
+// -------------------------------------------------------------- auth
+async function login(username, password) {
+    const data = await api('/api/auth/login', {
+        method: 'POST',
+        body: JSON.stringify({ username, password }),
+    });
+    state.token = data.token;
+    state.user = data.user;
+    localStorage.setItem(TOKEN_KEY, data.token);
+    localStorage.setItem(USER_KEY, JSON.stringify(data.user));
+    return data;
 }
 
-// Baca semua data dari server sekaligus.
-function loadFromServer() {
-  return Promise.all([
-    api("/api/tasks").catch(function (error) {
-      handleApiError(error);
-      return [];
-    }),
-    // Daftar mata kuliah (berhalaman, untuk ditampilkan)
-    loadCourses().catch(function (error) {
-      handleApiError(error);
-      return null;
-    }),
-    // Semua mata kuliah (untuk dropdown, tidak dipaginasi)
-    api("/api/courses/options").catch(function (error) {
-      handleApiError(error);
-      return [];
-    }),
-    api("/api/notes").catch(function (error) {
-      handleApiError(error);
-      return [];
-    }),
-  ]).then(function (results) {
-    cachedTasks = results[0].map(normalizeTask);
-    cachedCourses = results[1] ? results[1].items : [];
-    cachedCourseOptions = results[2];
-    cachedNotes = results[3].map(normalizeNote);
-  });
+async function register(payload) {
+    return api('/api/auth/register', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+    });
 }
 
-// Ambil daftar mata kuliah yang sedang ditampilkan.
-function loadCourses() {
-  const params = new URLSearchParams();
-  if (courseFilters.search) params.set("search", courseFilters.search);
-  params.set("sort", courseFilters.sort);
-  params.set("order", courseFilters.order);
-  params.set("page", coursePage.page);
-  params.set("per_page", courseFilters.perPage);
-
-  return api("/api/courses?" + params.toString()).then(function (payload) {
-    cachedCourses = payload.items;
-    coursePage = {
-      page: payload.page,
-      total: payload.total,
-      totalPages: payload.total_pages,
-      hasPrev: payload.has_prev,
-      hasNext: payload.has_next,
-    };
-    renderCourses();
-  });
+function logout(silent = false) {
+    state.token = null;
+    state.user = null;
+    localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(USER_KEY);
+    showAuth();
+    if (!silent) toast('Kamu sudah keluar', 'info');
 }
 
-// Sama seperti filter task: tunggu user berhenti mengetik.
-function applyCourseFilters() {
-  clearTimeout(courseFilterTimer);
-  courseFilterTimer = setTimeout(function () {
-    coursePage.page = 1;
-    loadCourses().catch(handleApiError);
-  }, 300);
+// ------------------------------------------------------------- render
+function renderAuth() {
+    const app = $('#app');
+    const auth = $('#auth');
+    if (state.token && state.user) {
+        auth.classList.add('hidden');
+        app.classList.remove('hidden');
+        const who = $('#currentUser');
+        if (who) who.textContent = state.user.full_name || state.user.username;
+    } else {
+        auth.classList.remove('hidden');
+        app.classList.add('hidden');
+    }
 }
 
-// Pembacaan data (synchronous, dari cache)
-const getTasks = () => cachedTasks;
-const getCourses = () => cachedCourses;
-const getNotes = () => cachedNotes;
-
-// Operasi tulis ke server
-function apiCreateTask(data) {
-  return api("/api/tasks", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(data),
-  });
-}
-
-function apiUpdateTask(id, data) {
-  return api("/api/tasks/" + id, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(data),
-  });
-}
-
-function apiDeleteTask(id) {
-  return api("/api/tasks/" + id, { method: "DELETE" });
-}
-
-function apiCreateCourse(data) {
-  return api("/api/courses", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(data),
-  });
-}
-
-function apiDeleteCourse(id) {
-  return api("/api/courses/" + id, { method: "DELETE" });
-}
-
-function apiResetAll() {
-  return api("/api/reset", { method: "POST" });
-}
-
-function apiCreateNote(data) {
-  return api("/api/notes", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(data),
-  });
-}
-
-function apiDeleteNote(id) {
-  return api("/api/notes/" + id, { method: "DELETE" });
-}
-
-// --------------------------------------------
-// 1b. LocalStorage Helpers (hanya untuk settings)
-// --------------------------------------------
-
-const STORAGE_KEYS = {
-  settings: "campusflow_settings",
-};
-
-function loadFromStorage(key, fallback) {
-  const raw = localStorage.getItem(key);
-  if (raw === null) {
-    return fallback;
-  }
-  try {
-    return JSON.parse(raw);
-  } catch (error) {
-    console.warn("Data rusak, menggunakan default:", key);
-    return fallback;
-  }
-}
-
-function saveToStorage(key, value) {
-  localStorage.setItem(key, JSON.stringify(value));
-}
-
-const getSettings = () =>
-  loadFromStorage(STORAGE_KEYS.settings, { darkMode: false });
-const saveSettings = (data) => saveToStorage(STORAGE_KEYS.settings, data);
-
-// --------------------------------------------
-// 2. Utilitas
-// --------------------------------------------
-
-// Tanggal hari ini dalam format YYYY-MM-DD.
-// locally harus 2 digit (09, bukan 9)
-function todayISO() {
-  const now = new Date();
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  const day = String(now.getDate()).padStart(2, "0");
-  return now.getFullYear() + "-" + month + "-" + day;
-}
-
-// OVERDUE bukan disimpan di database.
-// Status ini dihitung setiap render berdasarkan tanggal.
-function getEffectiveStatus(task) {
-  if (task.status === "COMPLETED") {
-    return "COMPLETED";
-  }
-  if (task.deadline && task.deadline < todayISO()) {
-    return "OVERDUE";
-  }
-  return task.status;
-}
-
-function daysUntil(dateISO) {
-  if (!dateISO) return null;
-  const target = new Date(dateISO + "T00:00:00");
-  const today = new Date(todayISO() + "T00:00:00");
-  return Math.round((target - today) / 86400000);
-}
-
-function formatDeadline(dateISO) {
-  const diff = daysUntil(dateISO);
-  if (diff === null) return "Tanpa deadline";
-  if (diff === 0) return "Hari ini";
-  if (diff === 1) return "Besok";
-  if (diff < 0) return "Terlambat " + Math.abs(diff) + " hari";
-  if (diff <= 7) return diff + " hari lagi";
-  return dateISO;
-}
-
-function escapeHTML(text) {
-  const div = document.createElement("div");
-  div.textContent = text;
-  return div.innerHTML;
-}
-
-const PRIORITIES = ["LOW", "MEDIUM", "HIGH", "URGENT"];
-
-const priorityColor = (p) => {
-  if (p === "URGENT") return "red";
-  if (p === "HIGH") return "orange";
-  if (p === "MEDIUM") return "yellow";
-  return "green";
-};
-
-const statusColor = (s) => {
-  if (s === "COMPLETED") return "green";
-  if (s === "OVERDUE") return "red";
-  if (s === "IN PROGRESS") return "blue";
-  return "gray";
-};
-
-// --------------------------------------------
-// 3. Data Awal (hanya sekali, jika storage kosong)
-// --------------------------------------------
-
-// --------------------------------------------
-// 3. Data Awal (disimpan ke server, hanya sekali)
-// --------------------------------------------
-// Sekarang data awal dikirim ke server lewat API,
-// bukan disimpan di LocalStorage.
-// Kalau database masih kosong, isi dengan contoh.
-// Kalau sudah ada, lewati saja.
-
-function seedIfEmpty() {
-  if (getTasks().length === 0) {
-    const sample = [
-      {
-        title: "Tugas Pemrograman Dasar",
-        description: "Buat program kalkulator sederhana",
-        deadline: offsetDate(2),
-        priority: "HIGH",
-      },
-      {
-        title: "Laporan Praktikum Matematika",
-        description: "Laporan modul integral",
-        deadline: offsetDate(6),
-        priority: "MEDIUM",
-      },
-      {
-        title: "Presentasi Basis Data",
-        description: "Slide normalisasi relasi",
-        deadline: offsetDate(-2),
-        priority: "URGENT",
-      },
-    ];
-
-    // Kirim satu per satu, lalu render setelah semua selesai
-    return Promise.all(sample.map(apiCreateTask))
-      .then(function (created) {
-        created.forEach(function (task) {
-          cachedTasks.push(normalizeTask(task));
-        });
-      })
-      .then(function () {
-        cachedTasks[0].status = "IN PROGRESS";
-        cachedTasks[0].progress = 40;
-        cachedTasks[2].progress = 10;
-        return Promise.all([
-          apiUpdateTask(cachedTasks[0].id, {
-            status: "IN PROGRESS",
-            progress: 40,
-          }),
-          apiUpdateTask(cachedTasks[2].id, { progress: 10 }),
-        ]);
-      })
-      .then(function () {
-        return loadFromServer();
-      });
-  }
-}
-
-function seedCoursesIfEmpty() {
-  if (getCourses().length > 0) return Promise.resolve();
-
-  const sample = [
-    {
-      name: "Pemrograman Dasar",
-      code: "IF101",
-      sks: 3,
-      lecturer: "Budi Santoso, S.T.",
-      day: "Senin",
-      time: "08:00 - 10:30",
-      room: "Lab Informatika",
-    },
-    {
-      name: "Matematika Diskret",
-      code: "IF102",
-      sks: 3,
-      lecturer: "Siti Aminah, S.Si.",
-      day: "Selasa",
-      time: "10:00 - 12:30",
-      room: "Ruang 301",
-    },
-    {
-      name: "Basis Data",
-      code: "IF103",
-      sks: 4,
-      lecturer: "Andi Wijaya, S.Kom.",
-      day: "Kamis",
-      time: "13:00 - 16:00",
-      room: "Lab Data",
-    },
-  ];
-
-  return Promise.all(sample.map(apiCreateCourse))
-    .then(function () {
-      // Ambil ulang dari server supaya halaman dan dropdown
-      // sama-sama ikut terisi.
-      return loadCourses();
-    })
-    .then(function () {
-      return api("/api/courses/options").then(function (options) {
-        cachedCourseOptions = options;
-        renderCourseOptions();
-      });
-    })
-    .catch(handleApiError);
-}
-
-function offsetDate(days) {
-  const d = new Date();
-  d.setDate(d.getDate() + days);
-  const month = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return d.getFullYear() + "-" + month + "-" + day;
-}
-
-// --------------------------------------------
-// 4. Render Tasks
-// --------------------------------------------
-// Search/filter/sort sekarang dikirim ke SERVER lewat query parameter.
-// Server yang memfilter, lalu hasilnya yang di-render.
-//
-// Debounce: menunggu 300ms setelah user berhenti mengetik.
-// Tanpa ini, ketik "flutter" = 7 request (f, fl, flu, flut, ...).
-// Dengan debounce, cukup 1 request.
-let filterTimer = null;
-let searchCache = "";
-let currentFilters = {
-  search: "",
-  status: "all",
-  priority: "all",
-  sort: "deadline",
-  order: "asc",
-};
-
-// Hitung ulang daftar dari server sesuai filter saat ini.
-function applyFilters(immediate) {
-  clearTimeout(filterTimer);
-  filterTimer = setTimeout(refreshFromServer, immediate ? 0 : 300);
-}
-
-// Minta daftar task ke server dengan filter yang sedang aktif.
-function refreshFromServer() {
-  const params = new URLSearchParams();
-  if (currentFilters.search) params.set("search", currentFilters.search);
-  if (currentFilters.status !== "all") params.set("status", currentFilters.status);
-  if (currentFilters.priority !== "all")
-    params.set("priority", currentFilters.priority);
-  params.set("sort", currentFilters.sort);
-  params.set("order", currentFilters.order);
-
-  return api("/api/tasks?" + params.toString())
-    .then(function (tasks) {
-      cachedTasks = tasks.map(normalizeTask);
-      renderTasks();
-      renderStats();
-      // Statistik ikut difilter server, jadi harus ambil ulang.
-      loadStats();
-    })
-    .catch(handleApiError);
-}
+function showAuth() { renderAuth(); }
 
 function renderTasks() {
-  const listEl = document.getElementById("task-list");
-  const tasks = getTasks();
+    const host = $('#taskList');
+    if (!host) return;
 
-  if (tasks.length === 0) {
-    listEl.innerHTML = emptyStateHTML();
-    return;
-  }
+    if (state.tasks.length === 0) {
+        host.innerHTML = `
+            <div class="empty">
+                <p>Belum ada tugas.</p>
+                <p class="muted">Tambahkan tugas pertamamu di atas.</p>
+            </div>`;
+        renderTaskPagination();
+        return;
+    }
 
-  listEl.innerHTML = "";
-  tasks.forEach(function (task) {
-    listEl.insertAdjacentHTML("beforeend", taskCardHTML(task));
-  });
-}
+    host.innerHTML = state.tasks.map((task) => {
+        const dl = deadlineLabel(task.deadline);
+        const course = task.course_code
+            ? `<span class="badge badge-course">${escapeHTML(task.course_code)}</span>`
+            : '';
+        const progressBar = task.status !== 'COMPLETED'
+            ? `<div class="progress"><div class="progress-fill" data-progress="${Number(task.progress) || 0}"></div></div>
+               <span class="progress-text">${task.progress}%</span>`
+            : '';
 
-function emptyStateHTML() {
-  return `
-        <div class="text-center py-12">
-            <p class="text-4xl mb-2">📝</p>
-            <p class="text-sm text-gray-500 dark:text-gray-400">Belum ada tugas.</p>
-            <p class="text-xs text-gray-400 dark:text-gray-500 mt-1">Tambahkan tugas pertama kamu di atas.</p>
-        </div>
-    `;
-}
-
-function taskCardHTML(task) {
-  const status = getEffectiveStatus(task);
-  const deadline = formatDeadline(task.deadline);
-  const isLate = status === "OVERDUE";
-
-  return `
-        <div class="border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-white dark:bg-gray-800">
-            <div class="flex items-start gap-3">
-                <input
-                    type="checkbox"
-                    data-action="toggle"
-                    data-id="${task.id}"
-                    ${status === "COMPLETED" ? "checked" : ""}
-                    class="mt-1 h-4 w-4"
-                    aria-label="Tandai selesai: ${escapeHTML(task.title)}"
-                >
-                <div class="flex-1 min-w-0">
-                    <p class="text-sm font-medium ${status === "COMPLETED" ? "line-through text-gray-400" : ""}">
-                        ${escapeHTML(task.title)}
-                    </p>
-                    <p class="text-xs text-gray-500 dark:text-gray-400">
-                        ${escapeHTML(task.description || "-")}
-                    </p>
-                    <p class="text-xs mt-1 ${isLate ? "text-red-500" : "text-gray-500 dark:text-gray-400"}">
-                        📅 ${deadline}${isLate ? " - TERLAMBAT" : ""}
-                    </p>
-                    ${
-                      task.courseName
-                        ? `<p class="text-xs mt-1 text-indigo-600 dark:text-indigo-400">
-                               📚 ${escapeHTML(task.courseName)}
-                           </p>`
-                        : ""
-                    }
-
-                    <div class="mt-3">
-                        <div class="flex justify-between text-xs text-gray-500 dark:text-gray-400 mb-1">
-                            <span>Progress</span>
-                            <span data-progress-label data-id="${task.id}">${task.progress || 0}%</span>
-                        </div>
-                        <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2 overflow-hidden">
-                            <div data-progress-bar data-id="${task.id}" class="progress-fill bg-blue-500 h-full rounded-full" style="width: ${task.progress || 0}%"></div>
-                        </div>
-                        <input
-                            type="range"
-                            min="0" max="100" step="10"
-                            value="${task.progress || 0}"
-                            data-action="progress"
-                            data-id="${task.id}"
-                            class="w-full mt-2"
-                            aria-label="Progress: ${escapeHTML(task.title)}"
-                        >
-                    </div>
+        return `
+        <article class="task-card" data-id="${task.id}">
+            <div class="task-main">
+                <div class="task-title-row">
+                    <h3 class="task-title">${escapeHTML(task.title)}</h3>
+                    ${course}
                 </div>
-                <div class="flex flex-col items-end gap-2">
-                    <span class="text-xs rounded px-2 py-0.5 bg-${statusColor(status)}-100 text-${statusColor(status)}-700">
-                        ${status}
-                    </span>
-                    <span class="text-xs rounded px-2 py-0.5 bg-${priorityColor(task.priority)}-100 text-${priorityColor(task.priority)}-700">
-                        ${task.priority}
-                    </span>
-                    <div class="flex gap-1">
-                        <button data-action="edit" data-id="${task.id}" class="text-xs text-blue-600 hover:underline">Edit</button>
-                        <button data-action="delete" data-id="${task.id}" class="text-xs text-red-500 hover:underline">Hapus</button>
-                    </div>
+                ${task.description ? `<p class="task-desc">${escapeHTML(task.description)}</p>` : ''}
+                <div class="task-meta">
+                    <span class="badge badge-${task.status.toLowerCase().replace(/\s/g, '-')}">${task.status}</span>
+                    <span class="badge badge-priority-${task.priority.toLowerCase()}">${task.priority}</span>
+                    <span class="deadline ${dl.cls}">${escapeHTML(dl.text)}</span>
                 </div>
+                ${progressBar}
             </div>
-        </div>
-    `;
+            <div class="task-actions">
+                <button class="btn-icon" data-action="toggle" title="Tandai selesai">✓</button>
+                <button class="btn-icon" data-action="edit" title="Edit">✎</button>
+                <button class="btn-icon danger" data-action="delete" title="Hapus">🗑</button>
+            </div>
+        </article>`;
+    }).join('');
+
+    renderTaskPagination();
 }
 
-// --------------------------------------------
-// 5. Task Actions
-// --------------------------------------------
-
-function addTask(event) {
-  event.preventDefault();
-
-  const titleInput = document.getElementById("task-title");
-  const errorEl = document.getElementById("form-error");
-  const title = titleInput.value.trim();
-
-  if (title === "") {
-    errorEl.textContent = "Judul tugas tidak boleh kosong.";
-    titleInput.focus();
-    return;
-  }
-
-  errorEl.textContent = "";
-
-  const newTask = {
-    title: title,
-    description: document.getElementById("task-description").value.trim(),
-    deadline: document.getElementById("task-deadline").value,
-    priority: document.getElementById("task-priority").value,
-    // String kosong berarti tidak ada mata kuliah (NULL di server).
-    course_id: document.getElementById("task-course").value || null,
-  };
-
-  apiCreateTask(newTask)
-    .then(function () {
-      event.target.reset();
-      refresh();
-    })
-    .catch(handleApiError);
-}
-
-function toggleTask(id) {
-  const task = getTasks().find(function (t) {
-    return t.id == id;
-  });
-
-  if (!task) return;
-
-  const nextStatus = task.status === "COMPLETED" ? "TODO" : "COMPLETED";
-
-  apiUpdateTask(id, { status: nextStatus }).then(refresh).catch(handleApiError);
-}
-
-function updateProgress(id, value) {
-  const task = getTasks().find(function (t) {
-    return t.id == id;
-  });
-
-  if (!task) return;
-
-  // Update tampilan lebih dulu supaya slider tidak lag
-  task.progress = Number(value);
-
-  if (task.progress === 100) {
-    task.status = "COMPLETED";
-  } else if (task.status === "COMPLETED") {
-    task.status = "IN PROGRESS";
-  }
-
-  // Jangan render ulang seluruh list, karena slider yang sedang
-  // di-drag akan ikut hilang. Update langsung elemennya saja.
-  const bar = document.querySelector(
-    '[data-progress-bar][data-id="' + id + '"]',
-  );
-  const label = document.querySelector(
-    '[data-progress-label][data-id="' + id + '"]',
-  );
-
-  if (bar) bar.style.width = task.progress + "%";
-  if (label) label.textContent = task.progress + "%";
-
-  renderStats();
-
-  // Kirim ke server, lalu ambil statistik terbaru.
-  apiUpdateTask(id, { progress: task.progress, status: task.status })
-    .then(loadStats)
-    .catch(handleApiError);
-}
-
-function deleteTask(id) {
-  const task = getTasks().find(function (t) {
-    return t.id == id;
-  });
-
-  if (!task) return;
-  if (!window.confirm('Hapus tugas "' + task.title + '"?')) return;
-
-  apiDeleteTask(id).then(refresh).catch(handleApiError);
-}
-
-function updateStatus(id, newStatus) {
-  const task = getTasks().find(function (t) {
-    return t.id == id;
-  });
-
-  if (!task) return;
-
-  apiUpdateTask(id, { status: newStatus }).then(refresh).catch(handleApiError);
-}
-
-// --------------------------------------------
-// 6. Edit Modal
-// --------------------------------------------
-
-function openEditModal(id) {
-  const task = getTasks().find(function (t) {
-    return t.id == id;
-  });
-  if (!task) return;
-
-  document.getElementById("edit-id").value = task.id;
-  document.getElementById("edit-title").value = task.title;
-  document.getElementById("edit-description").value = task.description || "";
-  document.getElementById("edit-deadline").value = task.deadline || "";
-  document.getElementById("edit-priority").value = task.priority;
-  document.getElementById("edit-course").value = task.courseId || "";
-
-  const statusSelect =
-    document.getElementById("edit-status") || createStatusSelect();
-  statusSelect.value = task.status;
-
-  const modal = document.getElementById("edit-modal");
-  modal.classList.remove("hidden");
-  modal.classList.add("flex");
-  document.getElementById("edit-title").focus();
-}
-
-function createStatusSelect() {
-  const select = document.createElement("select");
-  select.id = "edit-status";
-  select.setAttribute("aria-label", "Status");
-  select.className = "input w-full";
-  ["TODO", "IN PROGRESS", "COMPLETED"].forEach(function (s) {
-    const opt = document.createElement("option");
-    opt.value = s;
-    opt.textContent = s;
-    select.appendChild(opt);
-  });
-  document.getElementById("edit-priority").parentNode.appendChild(select);
-  return select;
-}
-
-function closeEditModal() {
-  const modal = document.getElementById("edit-modal");
-  modal.classList.add("hidden");
-  modal.classList.remove("flex");
-}
-
-function saveEdit(event) {
-  event.preventDefault();
-
-  const id = Number(document.getElementById("edit-id").value);
-  const title = document.getElementById("edit-title").value.trim();
-
-  if (title === "") {
-    window.alert("Judul tidak boleh kosong.");
-    return;
-  }
-
-  const task = getTasks().find(function (t) {
-    return t.id === id;
-  });
-  if (!task) return;
-
-  const changes = {
-    title: title,
-    description: document.getElementById("edit-description").value.trim(),
-    deadline: document.getElementById("edit-deadline").value,
-    priority: document.getElementById("edit-priority").value,
-    course_id: document.getElementById("edit-course").value || null,
-  };
-
-  const statusSelect = document.getElementById("edit-status");
-  if (statusSelect) {
-    changes.status = statusSelect.value;
-  }
-
-  apiUpdateTask(id, changes)
-    .then(function () {
-      closeEditModal();
-      refresh();
-    })
-    .catch(handleApiError);
-}
-
-// --------------------------------------------
-// 7. Stats & Analytics
-// --------------------------------------------
-
-function renderStats() {
-  const tasks = getTasks();
-
-  const completed = tasks.filter(function (t) {
-    return getEffectiveStatus(t) === "COMPLETED";
-  }).length;
-
-  const overdue = tasks.filter(function (t) {
-    return getEffectiveStatus(t) === "OVERDUE";
-  }).length;
-
-  document.getElementById("stat-total").textContent = tasks.length;
-  document.getElementById("stat-completed").textContent = completed;
-  document.getElementById("stat-pending").textContent =
-    tasks.length - completed - overdue;
-  document.getElementById("stat-overdue").textContent = overdue;
-}
-
-// Statistik dihitung di server (SQLite), bukan di browser.
-// Database yang punya COUNT, SUM, dan GROUP BY-nya.
-let cachedStats = null;
-
-function loadStats() {
-  return api("/api/stats")
-    .then(function (stats) {
-      cachedStats = stats;
-      renderAnalytics();
-    })
-    .catch(handleApiError);
-}
-
-function renderAnalytics() {
-  const stats = cachedStats;
-  if (!stats) return;
-
-  const summary = stats.summary;
-
-  document.getElementById("stat-card-completed").textContent =
-    summary.completed;
-  document.getElementById("stat-card-progress").textContent =
-    summary.in_progress;
-  document.getElementById("stat-card-week").textContent = summary.due_this_week;
-  document.getElementById("stat-card-no-deadline").textContent =
-    summary.no_deadline;
-
-  const rate = stats.completion_rate;
-  document.getElementById("completion-bar").style.width = rate + "%";
-  document.getElementById("completion-label").textContent =
-    rate + "% (" + summary.completed + " dari " + summary.total + ")";
-
-  // --- Tugas per prioritas ---
-  const byPriority = {};
-  stats.by_priority.forEach(function (row) {
-    byPriority[row.priority] = row.total;
-  });
-
-  const breakdown = document.getElementById("priority-breakdown");
-  breakdown.innerHTML = "";
-  PRIORITIES.forEach(function (priority) {
-    const count = byPriority[priority] || 0;
-    const li = document.createElement("li");
-    li.className = "flex justify-between";
-    li.innerHTML = `
-            <span class="inline-flex items-center gap-2">
-                <span class="w-2 h-2 rounded-full bg-${priorityColor(priority)}-500"></span>
-                ${priority}
-            </span>
-            <span class="font-medium">${count}</span>
-        `;
-    breakdown.appendChild(li);
-  });
-
-  // --- Beban per mata kuliah ---
-  const courseList = document.getElementById("course-breakdown");
-  courseList.innerHTML = "";
-  if (stats.by_course.length === 0) {
-    courseList.innerHTML =
-      '<li class="text-xs text-gray-400">Belum ada mata kuliah.</li>';
-  } else {
-    stats.by_course.forEach(function (row) {
-      const max = Math.max.apply(
-        null,
-        stats.by_course.map(function (c) {
-          return c.total;
-        }),
-      );
-      // Persentase lebar bar, minimal 4% supaya bar tetap terlihat
-      // walau jumlahnya cuma 1.
-      const width = max > 0 ? Math.max(4, (row.total / max) * 100) : 0;
-      const done = row.total > 0 ? Math.round((row.completed / row.total) * 100) : 0;
-
-      const li = document.createElement("li");
-      li.innerHTML = `
-        <div class="flex justify-between text-xs mb-1">
-          <span>${escapeHTML(row.name)}</span>
-          <span class="font-medium">${row.total} tugas${row.total > 0 ? " · " + done + "% selesai" : ""}</span>
-        </div>
-        <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1.5 overflow-hidden">
-          <div class="bg-indigo-500 h-full rounded-full" style="width: ${width}%"></div>
-        </div>
-      `;
-      courseList.appendChild(li);
-    });
-  }
-
-  // --- Deadline terdekat ---
-  const upcoming = document.getElementById("upcoming-list");
-  upcoming.innerHTML = "";
-  if (stats.upcoming.length === 0) {
-    upcoming.innerHTML =
-      '<li class="text-xs text-gray-400">Tidak ada deadline terdekat.</li>';
-  } else {
-    stats.upcoming.forEach(function (task) {
-      const li = document.createElement("li");
-      li.className = "flex justify-between text-xs border-b border-gray-100 dark:border-gray-700 py-1";
-      li.innerHTML = `
-        <span class="truncate pr-2">${escapeHTML(task.title)}</span>
-        <span class="text-gray-500 dark:text-gray-400 shrink-0">${escapeHTML(formatDeadline(task.deadline))}</span>
-      `;
-      upcoming.appendChild(li);
-    });
-  }
-
-  // --- Paling lama belum selesai ---
-  const stuck = document.getElementById("stuck-list");
-  stuck.innerHTML = "";
-  if (stats.stuck.length === 0) {
-    stuck.innerHTML =
-      '<li class="text-xs text-gray-400">Semua tugas sudah selesai.</li>';
-  } else {
-    stats.stuck.forEach(function (task) {
-      const li = document.createElement("li");
-      li.className = "flex justify-between text-xs border-b border-gray-100 dark:border-gray-700 py-1";
-      li.innerHTML = `
-        <span class="truncate pr-2">${escapeHTML(task.title)}</span>
-        <span class="text-gray-500 dark:text-gray-400 shrink-0">${task.progress}%</span>
-      `;
-      stuck.appendChild(li);
-    });
-  }
-}
-
-// --------------------------------------------
-// 8. Courses
-// --------------------------------------------
-
-// Isi dropdown "Mata Kuliah" di form tambah dan form edit.
-// Pakai cachedCourseOptions (semua mata kuliah), bukan cachedCourses
-// (hanya halaman yang sedang tampil). Kalau pakai cachedCourses,
-// mata kuliah di halaman 2 tidak akan pernah bisa dipilih.
-function renderCourseOptions() {
-  const options = cachedCourseOptions
-    .map(function (course) {
-      const label = course.code
-        ? course.name + " (" + course.code + ")"
-        : course.name;
-      return `<option value="${course.id}">${escapeHTML(label)}</option>`;
-    })
-    .join("");
-
-  const html = '<option value="">Tanpa mata kuliah</option>' + options;
-
-  ["task-course", "edit-course"].forEach(function (id) {
-    const el = document.getElementById(id);
-    if (el) el.innerHTML = html;
-  });
-}
-
-function renderCoursePagination() {
-  const el = document.getElementById("course-pagination");
-  if (!el) return;
-
-  if (coursePage.total === 0) {
-    el.innerHTML = "";
-    return;
-  }
-
-  const from = (coursePage.page - 1) * courseFilters.perPage + 1;
-  const to = Math.min(
-    coursePage.page * courseFilters.perPage,
-    coursePage.total,
-  );
-
-  el.innerHTML = `
-    <p class="text-xs text-gray-500 dark:text-gray-400">
-      Menampilkan ${from}-${to} dari ${coursePage.total} mata kuliah
-    </p>
-    <div class="flex items-center gap-2">
-      <button type="button" id="course-prev" class="btn-secondary text-xs"
-        ${coursePage.hasPrev ? "" : "disabled"}>&larr; Sebelumnya</button>
-      <span class="text-xs text-gray-500 dark:text-gray-400">
-        Halaman ${coursePage.page} / ${coursePage.totalPages}
-      </span>
-      <button type="button" id="course-next" class="btn-secondary text-xs"
-        ${coursePage.hasNext ? "" : "disabled"}>Berikutnya &rarr;</button>
-    </div>
-  `;
-
-  const prev = document.getElementById("course-prev");
-  const next = document.getElementById("course-next");
-
-  if (prev) {
-    prev.addEventListener("click", function () {
-      if (!coursePage.hasPrev) return;
-      coursePage.page -= 1;
-      loadCourses().catch(handleApiError);
-    });
-  }
-  if (next) {
-    next.addEventListener("click", function () {
-      if (!coursePage.hasNext) return;
-      coursePage.page += 1;
-      loadCourses().catch(handleApiError);
-    });
-  }
+function renderTaskPagination() {
+    const host = $('#taskPagination');
+    if (!host) return;
+    const total = state.taskTotal || 0;
+    const pages = Math.max(1, Math.ceil(total / state.perPage));
+    if (pages <= 1) { host.innerHTML = ''; return; }
+
+    const buttons = [];
+    buttons.push(`<button data-page="${state.taskPage - 1}" ${state.taskPage === 1 ? 'disabled' : ''}>‹</button>`);
+    for (let p = 1; p <= pages; p++) {
+        buttons.push(`<button data-page="${p}" class="${p === state.taskPage ? 'active' : ''}">${p}</button>`);
+    }
+    buttons.push(`<button data-page="${state.taskPage + 1}" ${state.taskPage === pages ? 'disabled' : ''}>›</button>`);
+    host.innerHTML = buttons.join('');
 }
 
 function renderCourses() {
-  const listEl = document.getElementById("course-list");
-  const courses = getCourses();
+    const host = $('#courseList');
+    if (!host) return;
 
-  renderCourseOptions();
-  renderCoursePagination();
-
-  if (courses.length === 0) {
-    listEl.innerHTML = courseFilters.search
-      ? `<p class="text-sm text-gray-500 dark:text-gray-400">Tidak ada mata kuliah yang cocok dengan "${escapeHTML(courseFilters.search)}".</p>`
-      : '<p class="text-sm text-gray-500 dark:text-gray-400">Belum ada mata kuliah.</p>';
-    return;
-  }
-
-  listEl.innerHTML = "";
-
-  courses.forEach(function (course) {
-    listEl.insertAdjacentHTML(
-      "beforeend",
-      `
-            <div class="border border-gray-200 dark:border-gray-700 rounded-lg p-4">
-                <div class="flex justify-between items-start">
-                    <div>
-                        <p class="font-medium text-sm">${escapeHTML(course.name)}</p>
-                        <p class="text-xs text-gray-500 dark:text-gray-400">${escapeHTML(course.code)} - ${course.sks} SKS</p>
-                    </div>
-                    <span class="text-xs bg-indigo-100 text-indigo-700 rounded px-2 py-0.5">${course.sks} SKS</span>
-                </div>
-                <p class="text-xs text-gray-500 dark:text-gray-400 mt-2">${escapeHTML(course.lecturer)}</p>
-                <p class="text-xs text-gray-500 dark:text-gray-400">${escapeHTML(course.day)} - ${escapeHTML(course.time)}</p>
-                <p class="text-xs text-gray-400 dark:text-gray-500">${escapeHTML(course.room)}</p>
-                ${
-                  course.task_count
-                    ? `<p class="text-xs mt-2 text-indigo-600 dark:text-indigo-400">
-                           ${course.task_count} tugas · ${course.task_done} selesai
-                       </p>`
-                    : ""
-                }
-            </div>
-        `,
-    );
-  });
-}
-
-// --------------------------------------------
-// 9. Calendar
-// --------------------------------------------
-
-let currentMonth = new Date().getMonth();
-let currentYear = new Date().getFullYear();
-
-function renderCalendar() {
-  const grid = document.getElementById("calendar-grid");
-  const titleEl = document.getElementById("calendar-title");
-
-  const monthNames = [
-    "Januari",
-    "Februari",
-    "Maret",
-    "April",
-    "Mei",
-    "Juni",
-    "Juli",
-    "Agustus",
-    "September",
-    "Oktober",
-    "November",
-    "Desember",
-  ];
-
-  titleEl.textContent = monthNames[currentMonth] + " " + currentYear;
-
-  const firstDay = new Date(currentYear, currentMonth, 1).getDay();
-  const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
-
-  const tasks = getTasks();
-  const deadlinesByDate = {};
-  tasks.forEach(function (task) {
-    if (task.deadline) {
-      if (!deadlinesByDate[task.deadline]) deadlinesByDate[task.deadline] = 0;
-      deadlinesByDate[task.deadline]++;
+    if (state.courses.length === 0) {
+        host.innerHTML = '<div class="empty"><p>Tidak ada mata kuliah.</p></div>';
+        renderCoursePagination();
+        return;
     }
-  });
 
-  grid.innerHTML = "";
+    const canDelete = state.user && state.user.role === 'admin';
+    host.innerHTML = state.courses.map((c) => {
+        const pct = c.task_count ? Math.round((c.task_done / c.task_count) * 100) : 0;
+        return `
+        <article class="course-card" data-accent="${escapeHTML(c.color || '#6366f1')}">
+            <div class="course-head">
+                <span class="course-code">${escapeHTML(c.code)}</span>
+                ${pct === 100 ? '<span class="badge badge-completed">Selesai</span>' : ''}
+            </div>
+            <h3>${escapeHTML(c.name)}</h3>
+            <p class="muted">${escapeHTML(c.lecturer || '-')}</p>
+            <p class="muted small">${escapeHTML(c.day || '')} ${escapeHTML(c.time || '')} · ${escapeHTML(c.room || '')}</p>
+            <div class="course-progress">
+                <div class="progress"><div class="progress-fill" data-progress="${pct}"></div></div>
+                <span class="small">${c.task_done}/${c.task_count} tugas</span>
+            </div>
+            ${canDelete ? `<button class="btn-sm danger" data-course-delete="${c.id}">Hapus</button>` : ''}
+        </article>`;
+    }).join('');
+    applyInlineStyles(host);
 
-  for (let i = 0; i < firstDay; i++) {
-    grid.insertAdjacentHTML("beforeend", '<div class="py-2"></div>');
-  }
-
-  const today = todayISO();
-
-  for (let day = 1; day <= daysInMonth; day++) {
-    const month = String(currentMonth + 1).padStart(2, "0");
-    const dateKey =
-      currentYear + "-" + month + "-" + String(day).padStart(2, "0");
-    const isToday = dateKey === today;
-    const deadlineCount = deadlinesByDate[dateKey] || 0;
-
-    const classes = isToday
-      ? "bg-blue-600 text-white rounded-full font-bold"
-      : "hover:bg-gray-100 dark:hover:bg-gray-700 rounded";
-
-    grid.insertAdjacentHTML(
-      "beforeend",
-      `<div class="py-2 ${classes}">${day}${deadlineCount ? '<span class="text-xs"> ●</span>' : ""}</div>`,
-    );
-  }
+    renderCoursePagination();
 }
 
-function changeMonth(offset) {
-  currentMonth += offset;
-  if (currentMonth < 0) {
-    currentMonth = 11;
-    currentYear--;
-  } else if (currentMonth > 11) {
-    currentMonth = 0;
-    currentYear++;
-  }
-  renderCalendar();
-}
+function renderCoursePagination() {
+    const host = $('#coursePagination');
+    if (!host) return;
+    const total = state.courseTotal || 0;
+    const pages = Math.max(1, Math.ceil(total / 6));
+    if (pages <= 1) { host.innerHTML = ''; return; }
 
-// --------------------------------------------
-// 10. Notes
-// --------------------------------------------
+    const buttons = [];
+    buttons.push(`<button data-cpage="${state.coursePage - 1}" ${state.coursePage === 1 ? 'disabled' : ''}>‹</button>`);
+    for (let p = 1; p <= pages; p++) {
+        buttons.push(`<button data-cpage="${p}" class="${p === state.coursePage ? 'active' : ''}">${p}</button>`);
+    }
+    buttons.push(`<button data-cpage="${state.coursePage + 1}" ${state.coursePage === pages ? 'disabled' : ''}>›</button>`);
+    host.innerHTML = buttons.join('');
+}
 
 function renderNotes() {
-  const listEl = document.getElementById("note-list");
-  const notes = getNotes();
-
-  if (notes.length === 0) {
-    listEl.innerHTML =
-      '<p class="text-sm text-gray-500 dark:text-gray-400">Belum ada catatan.</p>';
-    return;
-  }
-
-  listEl.innerHTML = "";
-
-  notes.forEach(function (note) {
-    const li = document.createElement("li");
-    li.className =
-      "flex items-start gap-3 border border-gray-200 dark:border-gray-700 rounded-lg p-3";
-    li.innerHTML = `
-            <div class="flex-1">
-                <p class="text-sm">${escapeHTML(note.text)}</p>
-                <p class="text-xs text-gray-400 dark:text-gray-500 mt-1">${note.createdAt}</p>
+    const host = $('#noteList');
+    if (!host) return;
+    if (state.notes.length === 0) {
+        host.innerHTML = '<div class="empty"><p>Belum ada catatan.</p></div>';
+        return;
+    }
+    host.innerHTML = state.notes.map((n) => `
+        <div class="note note-${escapeHTML(n.color)} ${n.pinned ? 'pinned' : ''}" data-id="${n.id}">
+            <p>${escapeHTML(n.text)}</p>
+            <div class="note-actions">
+                <button class="btn-icon" data-note-action="pin" title="Sematkan">📌</button>
+                <button class="btn-icon danger" data-note-action="delete" title="Hapus">🗑</button>
             </div>
-            <button data-note-id="${note.id}" class="text-xs text-red-500 hover:underline">Hapus</button>
+        </div>`).join('');
+}
+
+function renderCourseOptions() {
+    const sel = $('#taskCourse');
+    if (!sel) return;
+    const current = sel.value;
+    sel.innerHTML = '<option value="">Tanpa mata kuliah</option>' +
+        state.courseOptions.map((c) =>
+            `<option value="${c.id}">${escapeHTML(c.code)} — ${escapeHTML(c.name)}</option>`
+        ).join('');
+    if (current) sel.value = current;
+}
+
+function renderStats() {
+    const host = $('#statsGrid');
+    if (!host || !state.stats) return;
+    const s = state.stats;
+
+    host.innerHTML = `
+        <div class="stat"><span class="stat-value">${s.total}</span><span class="stat-label">Total Tugas</span></div>
+        <div class="stat ok"><span class="stat-value">${s.completed}</span><span class="stat-label">Selesai</span></div>
+        <div class="stat danger"><span class="stat-value">${s.overdue}</span><span class="stat-label">Terlambat</span></div>
+        <div class="stat info"><span class="stat-value">${s.in_progress}</span><span class="stat-label">Dikerjakan</span></div>
+        <div class="stat"><span class="stat-value">${s.completion_rate}%</span><span class="stat-label">Tingkat Selesai</span></div>
+        <div class="stat"><span class="stat-value">${s.average_progress}%</span><span class="stat-label">Rata-rata Progres</span></div>
+    `;
+
+    const ins = $('#insightPanel');
+    if (ins) {
+        const fg = state.forecast;
+        const sug = state.suggestions || [];
+        ins.innerHTML = `
+            <h3>Insight</h3>
+            ${fg ? `<p class="forecast forecast-${fg.verdict.toLowerCase()}">
+                <strong>${fg.verdict}</strong> — ${escapeHTML(fg.message)}
+                (${fg.tasks_due} tugas dalam ${fg.horizon_days} hari, beban ${fg.load_percent}%)
+            </p>` : ''}
+            ${sug.length ? `<p class="muted small">Prioritas berikutnya:</p><ol class="suggestions">${
+                sug.slice(0, 3).map((t) => `<li>
+                    <strong>${escapeHTML(t.title)}</strong>
+                    <span class="muted small">skor ${t.urgency_score} · ${escapeHTML((t.reasons || []).join(', '))}</span>
+                </li>`).join('')
+            }</ol>` : '<p class="muted small">Tidak ada saran. Semua beres.</p>'}
         `;
-    listEl.appendChild(li);
-  });
+    }
 }
 
-function addNote(event) {
-  event.preventDefault();
+// -------------------------------------------------------------- data
+async function loadTasks(page = state.taskPage) {
+    const params = new URLSearchParams();
+    params.set('page', page);
+    params.set('per_page', state.perPage);
+    params.set('sort', state.sort.key);
+    params.set('order', state.sort.order);
 
-  const input = document.getElementById("note-text");
-  const text = input.value.trim();
+    if (state.currentFilter !== 'all') params.set('status', state.currentFilter);
+    if (state.filters.search) params.set('search', state.filters.search);
+    if (state.filters.priority) params.set('priority', state.filters.priority);
+    if (state.filters.courseId) params.set('course_id', state.filters.courseId);
 
-  if (text === "") return;
-
-  apiCreateNote({ text: text })
-    .then(function (note) {
-      cachedNotes.unshift(normalizeNote(note));
-      event.target.reset();
-      renderNotes();
-    })
-    .catch(handleApiError);
+    const data = await api(`/api/tasks?${params}`);
+    state.tasks = data.items;
+    state.taskTotal = data.total;
+    state.taskPage = data.page;
+    renderTasks();
 }
 
-function deleteNote(id) {
-  apiDeleteNote(id)
-    .then(function () {
-      cachedNotes = cachedNotes.filter(function (note) {
-        return note.id != id;
-      });
-      renderNotes();
-    })
-    .catch(handleApiError);
+async function loadCourses(page = state.coursePage) {
+    const params = new URLSearchParams();
+    params.set('page', page);
+    params.set('per_page', 6);
+    params.set('sort', state.courseSort.key);
+    params.set('order', state.courseSort.order);
+
+    const data = await api(`/api/courses?${params}`);
+    state.courses = data.items;
+    state.courseTotal = data.total;
+    state.coursePage = data.page;
+    renderCourses();
 }
 
-// --------------------------------------------
-// 11. Theme (Dark Mode)
-// --------------------------------------------
-
-function applyTheme(isDark) {
-  document.documentElement.classList.toggle("dark", isDark);
-  document.getElementById("setting-dark-mode").checked = isDark;
-
-  const settings = getSettings();
-  settings.darkMode = isDark;
-  saveSettings(settings);
+async function loadOptions() {
+    state.courseOptions = await api('/api/courses/options');
+    renderCourseOptions();
 }
 
-function toggleTheme() {
-  const isDark = document.documentElement.classList.contains("dark");
-  applyTheme(!isDark);
+async function loadNotes() {
+    state.notes = await api('/api/notes');
+    renderNotes();
 }
 
-// --------------------------------------------
-// 12. Navigation & Mobile
-// --------------------------------------------
+async function loadStats() {
+    const [stats, suggestions, forecast] = await Promise.all([
+        api('/api/stats'),
+        api('/api/analytics/suggestions?limit=5'),
+        api('/api/analytics/forecast?days=7'),
+    ]);
+    state.stats = stats;
+    state.suggestions = suggestions.items;
+    state.forecast = forecast;
+    renderStats();
+}
 
-function setupNavigation() {
-  document
-    .getElementById("nav-list")
-    .addEventListener("click", function (event) {
-      const link = event.target.closest(".nav-link");
-      if (!link) return;
+async function loadAll() {
+    try {
+        await loadOptions();
+        await Promise.all([loadTasks(), loadCourses(), loadNotes(), loadStats()]);
+    } catch (err) {
+        toast(err.message, 'error');
+    }
+}
 
-      event.preventDefault();
-      document.querySelectorAll(".nav-link").forEach(function (el) {
-        el.classList.remove("active");
-      });
-      link.classList.add("active");
+// -------------------------------------------------------------- task
+async function submitTask(event) {
+    event.preventDefault();
+    const form = event.target;
+    const payload = {
+        title: $('#taskTitle').value.trim(),
+        description: $('#taskDescription').value.trim(),
+        deadline: $('#taskDeadline').value || null,
+        priority: $('#taskPriority').value,
+        course_id: $('#taskCourse').value ? Number($('#taskCourse').value) : null,
+    };
 
-      const targetId = link.getAttribute("href").substring(1);
-      const target = document.getElementById(targetId);
-      if (target) {
-        target.scrollIntoView({ behavior: "smooth" });
-      }
+    if (!payload.title) {
+        toast('Judul tidak boleh kosong', 'error');
+        return;
+    }
 
-      document.getElementById("sidebar").classList.remove("open");
+    const editingId = form.dataset.editing;
+    try {
+        if (editingId) {
+            await api(`/api/tasks/${editingId}`, {
+                method: 'PUT', body: JSON.stringify(payload),
+            });
+            toast('Tugas diperbarui', 'success');
+        } else {
+            await api('/api/tasks', { method: 'POST', body: JSON.stringify(payload) });
+            toast('Tugas ditambahkan', 'success');
+        }
+        form.reset();
+        delete form.dataset.editing;
+        $('#taskSubmit').textContent = 'Tambah';
+        $('#taskCancel').classList.add('hidden');
+        await Promise.all([loadTasks(), loadStats()]);
+    } catch (err) {
+        toast(err.message, 'error');
+    }
+}
+
+async function handleTaskAction(button) {
+    const card = button.closest('.task-card');
+    const id = card.dataset.id;
+    const action = button.dataset.action;
+
+    try {
+        if (action === 'delete') {
+            if (!confirm('Hapus tugas ini?')) return;
+            await api(`/api/tasks/${id}`, { method: 'DELETE' });
+            toast('Tugas dihapus', 'success');
+            await Promise.all([loadTasks(), loadStats(), loadCourses()]);
+        } else if (action === 'toggle') {
+            const task = state.tasks.find((t) => t.id === Number(id));
+            const next = task.status === 'COMPLETED' ? 'IN PROGRESS' : 'COMPLETED';
+            await api(`/api/tasks/${id}`, {
+                method: 'PUT', body: JSON.stringify({ status: next }),
+            });
+            await Promise.all([loadTasks(), loadStats(), loadCourses()]);
+        } else if (action === 'edit') {
+            const task = state.tasks.find((t) => t.id === Number(id));
+            const form = $('#taskForm');
+            form.dataset.editing = id;
+            $('#taskTitle').value = task.title;
+            $('#taskDescription').value = task.description || '';
+            $('#taskDeadline').value = task.deadline || '';
+            $('#taskPriority').value = task.priority;
+            $('#taskCourse').value = task.course_id || '';
+            $('#taskSubmit').textContent = 'Simpan';
+            $('#taskCancel').classList.remove('hidden');
+            $('#taskTitle').focus();
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+    } catch (err) {
+        toast(err.message, 'error');
+    }
+}
+
+// ------------------------------------------------------------- notes
+async function addNote(event) {
+    event.preventDefault();
+    const input = $('#noteInput');
+    const text = input.value.trim();
+    if (!text) return;
+    try {
+        await api('/api/notes', { method: 'POST', body: JSON.stringify({ text }) });
+        input.value = '';
+        await loadNotes();
+        toast('Catatan ditambahkan', 'success');
+    } catch (err) {
+        toast(err.message, 'error');
+    }
+}
+
+async function handleNoteAction(button) {
+    const note = button.closest('.note');
+    const id = note.dataset.id;
+    try {
+        if (button.dataset.noteAction === 'delete') {
+            await api(`/api/notes/${id}`, { method: 'DELETE' });
+            await loadNotes();
+        } else {
+            const current = state.notes.find((n) => n.id === Number(id));
+            await api(`/api/notes/${id}`, {
+                method: 'PUT', body: JSON.stringify({ pinned: !current.pinned }),
+            });
+            await loadNotes();
+        }
+    } catch (err) {
+        toast(err.message, 'error');
+    }
+}
+
+// -------------------------------------------------------------- auth ui
+async function handleAuthSubmit(event) {
+    event.preventDefault();
+    const isRegister = event.target.id === 'registerForm';
+    const errorBox = $('#authError');
+
+    const payload = isRegister ? {
+        username: $('#regUsername').value.trim().toLowerCase(),
+        email: $('#regEmail').value.trim().toLowerCase(),
+        password: $('#regPassword').value,
+        full_name: $('#regName').value.trim() || null,
+    } : {
+        username: $('#loginUsername').value.trim().toLowerCase(),
+        password: $('#loginPassword').value,
+    };
+
+    errorBox.textContent = '';
+    try {
+        if (isRegister) {
+            const created = await register(payload);
+            state.token = created.token;
+            state.user = created.user;
+            localStorage.setItem(TOKEN_KEY, created.token);
+            localStorage.setItem(USER_KEY, JSON.stringify(created.user));
+            toast('Akun dibuat. Selamat datang!', 'success');
+        } else {
+            await login(payload.username, payload.password);
+            toast(`Halo, ${state.user.full_name || state.user.username}`, 'success');
+        }
+        renderAuth();
+        await loadAll();
+    } catch (err) {
+        errorBox.textContent = err.message;
+    }
+}
+
+// -------------------------------------------------------------- events
+function bindEvents() {
+    $('#taskForm').addEventListener('submit', submitTask);
+    $('#noteForm').addEventListener('submit', addNote);
+
+    $('#taskList').addEventListener('click', (e) => {
+        const btn = e.target.closest('[data-action]');
+        if (btn) handleTaskAction(btn);
+    });
+    $('#noteList').addEventListener('click', (e) => {
+        const btn = e.target.closest('[data-note-action]');
+        if (btn) handleNoteAction(btn);
+    });
+    $('#courseList').addEventListener('click', async (e) => {
+        const btn = e.target.closest('[data-course-delete]');
+        if (!btn) return;
+        if (!confirm('Hapus mata kuliah ini? Tugas terkait tidak akan terhapus.')) return;
+        try {
+            await api(`/api/courses/${btn.dataset.courseDelete}?force=true`, { method: 'DELETE' });
+            toast('Mata kuliah dihapus', 'success');
+            await Promise.all([loadCourses(), loadOptions(), loadTasks()]);
+        } catch (err) {
+            toast(err.message, 'error');
+        }
+    });
+
+    $('#taskPagination').addEventListener('click', (e) => {
+        const btn = e.target.closest('[data-page]');
+        if (btn && !btn.disabled) loadTasks(Number(btn.dataset.page));
+    });
+    $('#coursePagination').addEventListener('click', (e) => {
+        const btn = e.target.closest('[data-cpage]');
+        if (btn && !btn.disabled) loadCourses(Number(btn.dataset.cpage));
+    });
+
+    $('#searchInput').addEventListener('input', debounce((e) => {
+        state.filters.search = e.target.value.trim();
+        loadTasks(1);
+    }, 350));
+
+    $('#priorityFilter').addEventListener('change', (e) => {
+        state.filters.priority = e.target.value;
+        loadTasks(1);
+    });
+    $('#courseFilter').addEventListener('change', (e) => {
+        state.filters.courseId = e.target.value;
+        loadTasks(1);
+    });
+
+    $$('[data-filter]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            state.currentFilter = btn.dataset.filter;
+            $$('[data-filter]').forEach((b) => b.classList.remove('active'));
+            btn.classList.add('active');
+            loadTasks(1);
+        });
+    });
+
+    $('#sortSelect').addEventListener('change', (e) => {
+        const [key, order] = e.target.value.split(':');
+        state.sort = { key, order };
+        loadTasks(1);
+    });
+
+    $('#courseSortSelect').addEventListener('change', (e) => {
+        const [key, order] = e.target.value.split(':');
+        state.courseSort = { key, order };
+        loadCourses(1);
+    });
+
+    $('#taskCancel').addEventListener('click', () => {
+        const form = $('#taskForm');
+        form.reset();
+        delete form.dataset.editing;
+        $('#taskSubmit').textContent = 'Tambah';
+        $('#taskCancel').classList.add('hidden');
+    });
+
+    $('#themeToggle').addEventListener('click', () => {
+        const now = document.documentElement.getAttribute('data-theme');
+        applyTheme(now === 'dark' ? 'light' : 'dark');
+    });
+
+    $('#logoutBtn').addEventListener('click', () => logout());
+
+    $('#loginForm').addEventListener('submit', handleAuthSubmit);
+    $('#registerForm').addEventListener('submit', handleAuthSubmit);
+
+    $$('[data-auth-tab]').forEach((tab) => {
+        tab.addEventListener('click', () => {
+            const target = tab.dataset.authTab;
+            $$('[data-auth-tab]').forEach((t) => t.classList.remove('active'));
+            tab.classList.add('active');
+            $('#loginPanel').classList.toggle('hidden', target !== 'login');
+            $('#registerPanel').classList.toggle('hidden', target !== 'register');
+            $('#authError').textContent = '';
+        });
     });
 }
 
-function setupMobileMenu() {
-  const btn = document.getElementById("mobile-menu-btn");
-  const sidebar = document.getElementById("sidebar");
-
-  btn.addEventListener("click", function () {
-    sidebar.classList.toggle("open");
-  });
+function debounce(fn, wait) {
+    let timer;
+    return (...args) => {
+        clearTimeout(timer);
+        timer = setTimeout(() => fn(...args), wait);
+    };
 }
 
-// --------------------------------------------
-// 13. Event Delegation untuk Task List
-// --------------------------------------------
+// --------------------------------------------------------------- init
+async function init() {
+    applyTheme(localStorage.getItem(THEME_KEY) || 'light');
+    bindEvents();
+    renderAuth();
 
-function setupTaskList() {
-  const listEl = document.getElementById("task-list");
-
-  listEl.addEventListener("click", function (event) {
-    const target = event.target.closest("[data-action]");
-    if (!target) return;
-
-    const action = target.dataset.action;
-    const id = target.dataset.id;
-
-    if (action === "delete") deleteTask(id);
-    if (action === "edit") openEditModal(id);
-  });
-
-  listEl.addEventListener("change", function (event) {
-    const target = event.target.closest('[data-action="toggle"]');
-    if (target) toggleTask(target.dataset.id);
-  });
-
-  listEl.addEventListener("input", function (event) {
-    const target = event.target.closest('[data-action="progress"]');
-    if (target) updateProgress(target.dataset.id, target.value);
-  });
+    if (state.token && state.user) {
+        try {
+            await api('/api/auth/me');
+            await loadAll();
+        } catch (err) {
+            logout(true);
+        }
+    }
 }
 
-// --------------------------------------------
-// 14. Init
-// --------------------------------------------
-
-function renderGreeting() {
-  const hour = new Date().getHours();
-  let greeting = "Good evening";
-  if (hour < 11) greeting = "Good morning";
-  else if (hour < 15) greeting = "Good afternoon";
-  else if (hour < 18) greeting = "Good evening";
-
-  document.getElementById("greeting").textContent = greeting + ", Lanang";
-  document.getElementById("today-date").textContent =
-    new Date().toLocaleDateString("id-ID", {
-      weekday: "long",
-      day: "numeric",
-      month: "long",
-      year: "numeric",
-    });
-}
-
-// Setelah data berubah, selalu ambil ulang dari server supaya
-// filter/sort yang aktif ikut ter-update. Contoh: kalau filter
-// "TODO" aktif lalu task dicentang jadi COMPLETED, task itu
-// harus hilang dari daftar -- kalau hanya render dari cache,
-// dia masih kelihatan sampai refresh halaman.
-function refresh() {
-  return refreshFromServer().then(function () {
-    renderCalendar();
-  });
-}
-
-function init() {
-  applyTheme(getSettings().darkMode);
-  renderGreeting();
-
-  document.getElementById("task-form").addEventListener("submit", addTask);
-  document.getElementById("note-form").addEventListener("submit", addNote);
-  document.getElementById("edit-form").addEventListener("submit", saveEdit);
-  document
-    .getElementById("edit-cancel")
-    .addEventListener("click", closeEditModal);
-  document
-    .getElementById("theme-toggle")
-    .addEventListener("click", toggleTheme);
-  document
-    .getElementById("calendar-prev")
-    .addEventListener("click", function () {
-      changeMonth(-1);
-    });
-  document
-    .getElementById("calendar-next")
-    .addEventListener("click", function () {
-      changeMonth(1);
-    });
-  // Search: debounce 300ms supaya tidak spam request
-  document.getElementById("task-search").addEventListener("input", function () {
-    currentFilters.search = this.value.trim();
-    applyFilters();
-  });
-
-  // Filter & sort: langsung, karena user tidak mengetik
-  document
-    .getElementById("filter-status")
-    .addEventListener("change", function () {
-      currentFilters.status = this.value;
-      applyFilters(true);
-    });
-
-  document
-    .getElementById("filter-priority")
-    .addEventListener("change", function () {
-      currentFilters.priority = this.value;
-      applyFilters(true);
-    });
-
-  document.getElementById("sort-by").addEventListener("change", function () {
-    currentFilters.sort = this.value;
-    applyFilters(true);
-  });
-
-  document.getElementById("sort-order").addEventListener("click", function () {
-    currentFilters.order = currentFilters.order === "asc" ? "desc" : "asc";
-    this.textContent = currentFilters.order === "asc" ? "↑" : "↓";
-    this.setAttribute(
-      "aria-label",
-      currentFilters.order === "asc" ? "Urutkan menurun" : "Urutkan menaik",
-    );
-    applyFilters(true);
-  });
-
-  // Pencarian mata kuliah (debounce, sama seperti pencarian task)
-  document
-    .getElementById("course-search")
-    .addEventListener("input", function () {
-      courseFilters.search = this.value.trim();
-      applyCourseFilters();
-    });
-
-  document
-    .getElementById("course-sort")
-    .addEventListener("change", function () {
-      courseFilters.sort = this.value;
-      coursePage.page = 1;
-      loadCourses().catch(handleApiError);
-    });
-
-  document
-    .getElementById("course-order")
-    .addEventListener("change", function () {
-      courseFilters.order = this.value;
-      coursePage.page = 1;
-      loadCourses().catch(handleApiError);
-    });
-  document
-    .getElementById("setting-dark-mode")
-    .addEventListener("change", function (event) {
-      applyTheme(event.target.checked);
-    });
-  document.getElementById("reset-data").addEventListener("click", function () {
-    if (
-      !window.confirm(
-        "Hapus SEMUA data CampusFlow? Tindakan ini tidak bisa dibatalkan.",
-      )
-    )
-      return;
-    apiResetAll()
-      .then(function () {
-        localStorage.removeItem(STORAGE_KEYS.settings);
-        window.location.reload();
-      })
-      .catch(handleApiError);
-  });
-
-  document
-    .getElementById("note-list")
-    .addEventListener("click", function (event) {
-      const btn = event.target.closest("[data-note-id]");
-      if (btn) deleteNote(btn.dataset.noteId);
-    });
-
-  document.addEventListener("keydown", function (event) {
-    if (event.key === "Escape") closeEditModal();
-  });
-
-  setupNavigation();
-  setupMobileMenu();
-  setupTaskList();
-
-  // Data harus dimuat dari server DULUAN, baru render.
-  // Kalau render duluan, halaman akan tampil kosong
-  // lalu berubah sendiri setelah server menjawab (flicker).
-  loadFromServer()
-    .then(seedIfEmpty)
-    .then(seedCoursesIfEmpty)
-    .then(function () {
-      renderTasks();
-      renderStats();
-      renderCourses();
-      renderNotes();
-      renderCalendar();
-      // Statistik dihitung server, jadi paling akhir diambil.
-      return loadStats();
-    })
-    .catch(handleApiError);
-}
-
-document.addEventListener("DOMContentLoaded", init);
+document.addEventListener('DOMContentLoaded', init);

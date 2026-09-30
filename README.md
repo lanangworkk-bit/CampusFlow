@@ -1,484 +1,150 @@
 # CampusFlow
 
-**One Place for Your College Life.**
+Pengelola tugas kuliah pribadi. Satu tempat untuk mencatat tugas,
+memantau tenggat, dan melihat apakah bebannya masih masuk akal.
 
-Aplikasi web untuk membantu mahasiswa mengelola kehidupan akademik dan aktivitas kampus dalam satu platform. Dibangun secara bertahap dari Semester 1 hingga Semester 8 sebagai portfolio utama studi Informatika.
+Berjalan dengan Flask, SQLite, dan JavaScript polos tanpa framework
+di sisi klien. Tidak ada build step, tidak ada `npm install`.
 
----
+## Fitur
 
-## 🎓 Semester 2 — Flask + Database (branch `semester-2`)
+**Tugas**
+- Buat, ubah, hapus tugas lengkap dengan judul, deskripsi, prioritas,
+  tenggat, dan mata kuliah
+- Status TODO, IN PROGRESS, dan COMPLETED dengan progres 0-100 persen
+- Tampilan otomatis menandai tugas yang lewat tenggat sebagai
+  `OVERDUE`, tanpa perlu disimpan ulang
+- Filter gabungan, pencarian di beberapa kolom, pengurutan, dan
+  paginasi
+- Filter cepat: semua, belum, sedang, selesai, terlambat, hari ini,
+  minggu ini
 
-Versi ini adalah **lanjutan** dari Semester 1. Semua fitur Semester 1 tetap ada,
-tapi penyimpanan datanya pindah dari LocalStorage ke **server + database**.
+**Mata kuliah dan catatan**
+- Mata kuliah dengan kode, SKS, dosen, hari, jam, dan ruang
+- Catatan pribadi dengan fitur sematan
 
-### Apa yang Berubah?
+**Analitik**
+- Ringkasan progres dan tingkat penyelesaian
+- Beban kerja tujuh hari ke depan, dengan penilaian COMFORTABLE,
+  TIGHT, atau OVERLOADED
+- Saran urutan mengerjakan tugas, dihitung dari tenggat, prioritas,
+  progres, dan perkiraan waktu
+- Tugas yang macet: belum selesai meski tenggatnya sudah lewat
+- Produktivitas: rata-rata waktu penyelesaian, tugas per minggu, hari
+  paling sibuk, dan rentetan hari berurutan
 
-| | Semester 1 (`main`) | Semester 2 (`semester-2`) |
-|---|---|---|
-| Penyimpanan | LocalStorage (di browser) | SQLite (di server) |
-| Backend | Tidak ada | Flask |
-| Data | Hilang kalau cache dibersihkan | Permanen |
-| Akses | Cuma 1 browser | Browser manapun |
-| Dark mode | LocalStorage | Tetap LocalStorage (preferensi perangkat) |
+**Akun**
+- Registrasi dan login dengan JWT
+- Dua peran: student dan admin
+- Setiap pengguna hanya melihat dan mengubah datanya sendiri
 
-### Tech Stack (Semester 2)
+**Operasional**
+- Health check, versi aplikasi, dan metrik
+- Audit log untuk perubahan data
+- Rate limit pada endpoint sensitif
+- Container Docker dan konfigurasi CI
 
-```
-HTML5          - Struktur halaman
-Tailwind CSS   - Styling (via CDN)
-JavaScript     - Logika aplikasi + fetch() untuk API
-Python         - Bahasa backend
-Flask          - Web framework
-SQLite         - Database
-Jinja2         - Template engine Flask
-```
+## Menjalankan
 
-### Project Structure (Semester 2)
-
-```
-CampusFlow/
-├── templates/
-│   └── index.html          # Template Jinja2
-├── static/
-│   ├── script.js           # Logika + API calls
-│   └── style.css           # Custom CSS
-├── backend/
-│   ├── app.py              # Setup app + register blueprint
-│   ├── db.py               # Koneksi database + schema
-│   ├── seed_test_data.py   # Isi data uji lewat API
-│   ├── migrations/
-│   │   └── 001_add_course_to_tasks.sql
-│   └── routes/
-│       ├── __init__.py
-│       ├── main.py         # Halaman + reset
-│       ├── tasks.py        # CRUD task + filter + sort
-│       ├── courses.py      # CRUD mata kuliah + pagination
-│       ├── notes.py        # CRUD catatan
-│       └── stats.py        # Statistik (GROUP BY)
-├── database/
-│   └── campusflow.db       # Database SQLite (tidak di-commit)
-├── requirements.txt        # Daftar dependency
-└── README.md
-```
-
-### Installation (Semester 2)
-
-Pastikan Python 3 sudah terinstall.
+Butuh Python 3.11 atau lebih baru.
 
 ```bash
-git clone https://github.com/lanangworkk-bit/CampusFlow.git
-cd CampusFlow
-git checkout semester-2
-
-# Buat virtual environment
 python3 -m venv venv
 source venv/bin/activate
-
-# Install dependencies
 pip install -r requirements.txt
+flask --app backend.app seed --admin
+python3 -m backend.app
 ```
 
-### How to Run (Semester 2)
+Buka http://localhost:5002
+
+Akun yang dibuat oleh perintah seed:
+
+| Peran  | Username | Password    |
+| ------ | -------- | ----------- |
+| student | `demo`   | `demo1234`  |
+| admin   | `admin`  | `admin1234` |
+
+Ganti kedua password itu sebelum dipakai di lingkungan nyata.
+
+## Perintah lain
 
 ```bash
-source venv/bin/activate      # aktifkan venv
-python backend/app.py
+make dev            # mode pengembangan dengan auto-reload
+make test           # jalankan test
+make migrate        # terapkan perubahan skema database
+make check          # periksa konfigurasi dan koneksi database
+make reset          # hapus semua data, isi ulang dengan data contoh
+make clean          # hapus cache dan file sementara
+make docker-up      # jalankan dengan PostgreSQL dan Redis
+make docker-down    # hentikan semua container
 ```
 
-Lalu buka di browser: **http://localhost:5002**
+`make help` menampilkan daftar lengkap.
 
-Database akan dibuat otomatis saat pertama kali server jalan.
+## Konfigurasi
 
-> **Penting:** halaman **HARUS** dibuka lewat `http://localhost:5002`,
-> bukan klik dua kali `index.html`. Alasannya, `fetch()` butuh alamat server
-> untuk mengambil data. Jika dibuka sebagai `file:///`, browser tidak bisa
-> menghubungi database.
+Semua opsional. Tanpa konfigurasi apa pun, aplikasi memakai SQLite di
+`database/campusflow.db` dan sudah bisa langsung jalan.
 
-### REST API
+Salin `.env.example` jadi `.env` untuk mengubah nilai:
 
-| Method | URL | Fungsi |
-|---|---|---|
-| `GET` | `/api/tasks` | Daftar task (filter, sort, paginasi) |
-| `POST` | `/api/tasks` | Tambah task baru |
-| `GET` | `/api/tasks/<id>` | Ambil satu task |
-| `PUT` | `/api/tasks/<id>` | Update task |
-| `DELETE` | `/api/tasks/<id>` | Hapus task |
-| `GET` | `/api/courses` | Daftar mata kuliah (berhalaman) |
-| `GET` | `/api/courses/options` | Semua mata kuliah untuk dropdown |
-| `POST` | `/api/courses` | Tambah mata kuliah |
-| `DELETE` | `/api/courses/<id>` | Hapus mata kuliah |
-| `GET` | `/api/notes` | Daftar catatan |
-| `POST` | `/api/notes` | Tambah catatan |
-| `DELETE` | `/api/notes/<id>` | Hapus catatan |
-| `GET` | `/api/stats` | Statistik untuk dashboard |
-| `POST` | `/api/reset` | Hapus semua data |
+| Variabel | Default | Keterangan |
+| --- | --- | --- |
+| `SECRET_KEY` | kunci dev | Wajib diganti di produksi |
+| `JWT_SECRET_KEY` | sama dengan `SECRET_KEY` | Kunci penandatangan token |
+| `DATABASE_URL` | SQLite lokal | Contoh: `postgresql://user:pass@localhost/campusflow` |
+| `ADMIN_API_KEY` | kosong | Kunci untuk endpoint `/api/metrics` |
+| `RATELIMIT_STORAGE_URI` | `memory://` | Pakai `redis://` di produksi |
+| `CORS_ORIGINS` | tanpa CORS | origins yang diizinkan, dipisah koma |
+| `LOG_LEVEL` | `INFO` | `DEBUG` saat development |
 
-**Parameter query `GET /api/tasks`:**
+Mode `production` menolak berjalan kalau `SECRET_KEY` masih memakai
+kunci bawaan. Periksa dengan `flask --app backend.app check`.
 
-| Parameter | Contoh | Arti |
-|---|---|---|
-| `search` | `?search=sql` | Cari di judul dan deskripsi |
-| `status` | `?status=TODO` | `TODO`, `IN PROGRESS`, `COMPLETED`, `OVERDUE` |
-| `priority` | `?priority=HIGH` | `LOW`, `MEDIUM`, `HIGH`, `URGENT` |
-| `course_id` | `?course_id=2` | Filter per mata kuliah |
-| `sort` | `?sort=title` | `deadline`, `title`, `priority`, `status`, `created_at` |
-| `order` | `?order=desc` | `asc` atau `desc` |
-| `limit` | `?limit=10` | Maksimal baris (1-200) |
-| `offset` | `?offset=20` | Lewati N baris pertama |
+## Struktur
 
-Bisa digabung: `/api/tasks?search=sql&status=TODO&sort=deadline&limit=5`
-
-**Parameter query `GET /api/courses`** (paginasi berbasis nomor halaman):
-
-| Parameter | Contoh | Arti |
-|---|---|---|
-| `search` | `?search=data` | Cari di nama dan kode |
-| `sort` | `?sort=code` | `name`, `code`, `sks`, `task_count` |
-| `order` | `?order=desc` | `asc` atau `desc` |
-| `page` | `?page=2` | Nomor halaman, mulai dari 1 |
-| `per_page` | `?per_page=6` | Item per halaman |
-
-Contoh respons `/api/courses?per_page=3&page=1`:
-
-```json
-{
-  "items": [ ... ],
-  "total": 10,
-  "page": 1,
-  "per_page": 3,
-  "total_pages": 4,
-  "has_next": true,
-  "has_prev": false
-}
+```
+backend/
+  app.py              application factory, CLI, error handler
+  config.py           konfigurasi per environment
+  models/             model SQLAlchemy
+  routes/             endpoint auth, resource, analytics, system
+  services/           logika analytics, keamanan, optimasi
+  seed_data.py        data contoh
+templates/            halaman HTML
+static/               CSS dan JavaScript
+tests/                test pytest
 ```
 
-Kalau `page` melebihi `total_pages`, server otomatis mengembalikannya ke
-halaman terakhir, jadi frontend tidak perlu meminta halaman yang kosong.
-
-**Cara kerja validasi input** — berbeda antara "tolak" dan "abaikan":
-
-| Field | Nilai tidak valid | Sikap server |
-|---|---|---|
-| `title` kosong / spasi saja | 400 error | ditolak |
-| `deadline` format salah | 400 error | ditolak |
-| `status` / `priority` | pakai default | diabaikan diam-diam |
-| `progress` di luar 0-100 | pakai nilai lama | diabaikan diam-diam |
-| `course_id` tidak ada | `NULL` | dilepas dari course |
-| `sort` / `order` | pakai default | diabaikan diam-diam |
-
-Alasannya: `deadline` yang salah format akan **merusak data** (sorting
-salah, tanggal ditampilkan aneh), jadi harus ditolak. `priority` salah
-koma masih berupa teks yang masuk akal, jadi lebih aman diabaikan daripada
-menolak seluruh request.
-
-**Test API tanpa browser** — buka `http://localhost:5002/api/tasks` di browser,
-atau pakai `curl` di terminal:
+## Test
 
 ```bash
-curl http://localhost:5002/api/tasks
-curl http://localhost:5002/api/tasks/1
-
-curl "http://localhost:5002/api/tasks?status=TODO&sort=deadline"
-curl "http://localhost:5002/api/courses?per_page=3&page=1"
-curl http://localhost:5002/api/stats
-
-curl -X POST http://localhost:5002/api/tasks \
-  -H "Content-Type: application/json" \
-  -d '{"title":"Belajar Flask","deadline":"2026-10-20","priority":"HIGH"}'
+source venv/bin/activate
+python3 -m pytest tests/ -v
 ```
 
-**Isi data contoh** (3 mata kuliah, 9 task, 3 catatan):
+Test mencakup autentikasi dan peran, filter dan paginasi, nilai
+batas, kepemilikan data antar pengguna, sanitasi input, dan batas
+waktu respons.
+
+## Deployment
 
 ```bash
-python3 backend/seed_test_data.py
+docker compose up -d --build
 ```
 
-### Konsep yang Dipelajari di Semester 2
-
-**Fondasi (Tahap 1-2)**
-
-1. **Flask** — membuat server, route, dan request handler
-2. **REST API** — komunikasi antara frontend dan backend lewat HTTP
-3. **JSON** — format pertukaran data (Python `dict` ↔ JavaScript `object`)
-4. **Parameterized Query** — mencegah SQL Injection (`?` placeholder)
-5. **Primary Key & AUTOINCREMENT** — identitas unik tiap baris
-6. **CRUD** — Create, Read, Update, Delete
-7. **Status Code** — 200 OK, 201 Created, 400 Bad Request, 404 Not Found
-8. **Async/Await mental model** — `fetch()` butuh waktu, data belum tersedia
-   saat pertama dipanggil
-9. **Cache di memory** — hasil `fetch` disimpan sementara supaya kode
-   render tidak harus async di mana-mana
-10. **Business Logic di server** — aturan bisnis (misal `COMPLETED` →
-    `progress = 100`) ditulis di backend, bukan frontend
-
-**Tahap 3-4: query & modularisasi**
-
-11. **Dynamic WHERE** — filter disusun dari parameter user dengan
-    `?` placeholder, bukan input mentah
-12. **Whitelist sort** — nama kolom dari user dicocokkan ke dict
-    `SORT_EXPRESSIONS`; yang tidak ada di daftar tidak pernah masuk query
-13. **Blueprint** — memecah `app.py` monolitik jadi per fitur
-    (`routes/tasks.py`, `routes/courses.py`, ...)
-14. **Surgical refactor** — mengubah struktur tanpa mengubah perilaku
-
-**Tahap 5: relasi data**
-
-15. **Foreign Key** — `tasks.course_id` → `courses.id`
-16. **LEFT JOIN** — task tanpa mata kuliah tetap muncul, kolomnya `NULL`
-17. **ON DELETE SET NULL** — hapus mata kuliah tidak ikut menghapus task
-18. **Migration** — `migrations/001_*.sql` dicatat di `schema_migrations`
-    supaya tidak jalan dua kali
-19. **PRAGMA foreign_keys = ON** — SQLite tidak menegakkan FK secara default
-
-**Tahap 6-7: agregasi & pagination**
-
-20. **Aggregate function** — `COUNT`, `SUM`, `AVG`, `ROUND`
-21. **GROUP BY** — statistik per status, per prioritas, per mata kuliah
-22. **Calculated field** — `SUM(CASE WHEN status = 'COMPLETED' THEN 1 END)`
-23. **Pagination** — `LIMIT` + `OFFSET`, plus `total` dan `limit` di respons
-    supaya frontend tahu ada berapa halaman
-24. **Endpoint terpisah** — `/api/courses` (berhalaman) vs
-    `/api/courses/options` (semua, untuk dropdown)
-
-**Catatan kecil yang baruLearned saat Semester 2**
-
-- `NULL` dianggap lebih kecil dari tanggal manapun di SQLite, jadi
-  `ORDER BY deadline` menaruh task tanpa deadline paling atas.
-  Solusinya `COALESCE(deadline, '9999-12-31')` — contoh di `routes/tasks.py`.
-- Query `COALESCE` dengan alias harus dirujuk sebagai
-  `ORDER BY alias`, bukan mengulang ekspresinya, kalau nama kolomnya
-  berawalan `t.`.
-
-### Contoh Alur Request
-
-```
-User klik tombol "Tambah Task"
-        ↓
-JavaScript: fetch('/api/tasks', { method: 'POST', body: {...} })
-        ↓
-Browser mengirim HTTP request ke server
-        ↓
-Flask menerima di routes/tasks.py -> create_task()
-        ↓
-Divalidasi, lalu INSERT INTO tasks ... ? (aman dari SQL Injection)
-        ↓
-SQLite menyimpan data, db.commit()
-        ↓
-Flask balas JSON: { "id": 7, "title": "...", ... }
-        ↓
-JavaScript: .then() → masukkan ke cache → render ulang tampilan
-```
-
----
-
-## Fitur (Semester 1)
-
-| Modul | Fitur |
-|---|---|
-| **Dashboard** | Greeting dinamis, tanggal, 4 statistik card |
-| **Task Management** | Tambah, edit, hapus, ubah status, ubah progress |
-| **Prioritas** | LOW, MEDIUM, HIGH, URGENT (dengan warna berbeda) |
-| **Status** | TODO, IN PROGRESS, COMPLETED, OVERDUE (otomatis) |
-| **Deadline** | Dihitung otomatis: Hari ini, Besok, X hari lagi, Terlambat |
-| **Filter & Search** | Cari berdasarkan judul/deskripsi, filter berdasarkan status |
-| **Sorting** | Otomatis diurutkan berdasarkan deadline terdekat |
-| **Course List** | Nama, kode, SKS, dosen, hari, jam, ruangan |
-| **Calendar** | Kalender bulanan dengan penanda deadline |
-| **Notes** | Catatan sederhana tersimpan permanen |
-| **Analytics** | Task completion rate + breakdown per prioritas |
-| **Dark Mode** | Toggle tema, tersimpan di LocalStorage |
-| **Responsive** | Layout desktop, tablet, mobile |
-| **Accessibility** | Label ARIA, keyboard navigation (Esc), focus management |
-
----
-
-## ⚠️ Versi Semester 1 (branch `main`)
-
-Semua isi README di bawah ini menggambarkan **Semester 1** versi yang ada di branch `main`:
-frontend murni tanpa backend.
-
-Untuk versi **Semester 2** (Flask + database), pindah ke branch `semester-2`.
-
----
-
-## Tech Stack (Semester 1)
-
-```
-HTML5          - Struktur halaman
-Tailwind CSS   - Styling (via CDN)
-JavaScript     - Logika aplikasi (vanilla, tanpa framework)
-LocalStorage   - Penyimpanan data di browser
-Git & GitHub   - Version control
-```
-
-**Tidak ada backend, tidak ada database, tidak ada framework.** Ini murni frontend.
-
----
-
-## Project Structure (Semester 1)
-
-```
-CampusFlow/
-├── index.html          # Struktur halaman & modal
-├── assets/
-│   ├── script.js       # Logika aplikasi
-│   └── style.css       # Custom CSS & komponen reusable
-├── .gitignore
-└── README.md
-```
-
----
-
-## Installation (Semester 1)
-
-Tidak ada yang perlu di-install.
-
-**Clone repository:**
-
-```bash
-git clone https://github.com/lanangworkk-bit/CampusFlow.git
-cd CampusFlow
-```
-
----
-
-## How to Run (Semester 1)
-
-**Cara termudah:**
-
-Klik dua kali `index.html`. Selesai.
-
-**Alternatif dengan Live Server (VS Code):**
-
-1. Install extension "Live Server"
-2. Klik kanan `index.html` → "Open with Live Server"
-
----
-
-## Fitur Bonus: Lihat Data LocalStorage (Semester 1)
-
-Untuk belajar, buka Browser Console (`Cmd + Option + I` di Mac, `F12` di Windows) lalu ketik:
-
-```javascript
-localStorage.getItem('campusflow_tasks')
-```
-
-Ini akan menampilkan data tugas yang tersimpan dalam format JSON.
-
-Untuk menghapus semua data dan mulai ulang:
-
-```javascript
-localStorage.clear()
-```
-
-Atau klik tombol **"Reset Semua Data"** di section Pengaturan.
-
----
-
-## Konsep yang Dipelajari di Semester 1
-
-### 1. DOM Manipulation
-Mengubah tampilan halaman menggunakan JavaScript:
-
-```javascript
-document.getElementById('stat-total').textContent = 10;
-```
-
-### 2. Event Delegation
-Satu listener untuk banyak elemen dinamis. Listener tetap bekerja walaupun elemen baru ditambahkan.
-
-```javascript
-listEl.addEventListener('click', function (event) {
-    const target = event.target.closest('[data-action]');
-    if (target) deleteTask(target.dataset.id);
-});
-```
-
-### 3. LocalStorage
-Menyimpan data di browser secara permanen. Harus diserialisasi ke JSON.
-
-```javascript
-localStorage.setItem('key', JSON.stringify(data));
-const data = JSON.parse(localStorage.getItem('key'));
-```
-
-### 4. Template Literal
-Membuat HTML dari string dengan menyisipkan variabel.
-
-```javascript
-const html = `<p>${task.title}</p>`;
-```
-
-### 5. XSS Prevention
-Data dari user harus di-escape sebelum dimasukkan ke HTML.
-
-```javascript
-function escapeHTML(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-}
-```
-
-### 6. Derived State
-Status OVERDUE tidak disimpan, tapi dihitung ulang dari tanggal. Jadi selalu akurat tanpa perlu di-update manual.
-
-```javascript
-function getEffectiveStatus(task) {
-    if (task.status === 'COMPLETED') return 'COMPLETED';
-    if (task.deadline && task.deadline < todayISO()) return 'OVERDUE';
-    return task.status;
-}
-```
-
----
-
-## Roadmap
-
-| Semester | Fokus | Status |
-|---|---|---|
-| **1** | HTML, Tailwind CSS, JavaScript, DOM, LocalStorage | ✅ Selesai |
-| **2** | Python, Flask, SQLite, Blueprint, FK, agregasi, pagination | ✅ Selesai |
-| **3** | PostgreSQL, Authentication, JWT | 🔜 |
-| **4** | Data Analytics, AI, Machine Learning | 🔜 |
-| **5** | Docker, Linux, Cloud, CI/CD | 🔜 |
-| **6** | Cybersecurity, Secure Architecture | 🔜 |
-| **7** | System Design, Testing, Scalability | 🔜 |
-| **8** | Production, Optimization, Capstone | 🔜 |
-
-### Catatan tentang Semester 2
-
- versi awal CampusFlow sudah pernah dibangun dengan **Flask + SQLite** di branch `flask-backend`.
-Branch tersebut sengaja disimpan sebagai bahan pembelajaran komparasi静态 vs dynamic.
-
-**Pembelajaran kunci:**
-- Versi `main` (Semester 1): sederhana, cepat, nol konfigurasi, tapi data hanya di satu browser
-- Versi `flask-backend` (Semester 2): data tersimpan permanen di server, tapi butuh setup Python + venv + server jalan
-
-**Lihat perbedaannya:**
-
-```bash
-git checkout flask-backend
-```
-
----
-
-## Future Development
-
-- Upload file lampiran pada tugas
-- Relasi tugas dengan mata kuliah
-- Ekspor data ke PDF/CSV
-- Import data dari format lain
-- Sinkronisasi antar perangkat (membutuhkan backend)
-
----
-
-## Author
-
-Dibangun sebagai portfolio proyek studi Informatika.
-
----
-
-## License
-
-MIT License - bebas digunakan untuk keperluan belajar.
+Compose menjalankan tiga service: aplikasi di Gunicorn, PostgreSQL,
+dan Redis untuk rate limit. Data PostgreSQL disimpan di volume
+`pgdata` dan tidak hilang saat container dihapus.
+
+## Catatan
+
+Tugas berstatus `OVERDUE` tidak disimpan di database. Status itu
+dihitung saat dibaca dari perbandingan `deadline` dengan tanggal
+sekarang, jadi tugas yang menua tidak perlu migrasi. Field
+`status` hanya berisi tiga nilai yang benar-benar bisa dipilih user.
+
+Progres 100 persen selalu berarti `COMPLETED`, dan `COMPLETED` selalu
+memaksa progres jadi 100. Aturan ini berlaku di API maupun di form,
+supaya data tidak bisa masuk ke keadaan yang saling bertentangan.

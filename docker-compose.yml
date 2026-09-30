@@ -1,0 +1,71 @@
+# ===================================================================
+# CampusFlow - Docker Compose
+# ===================================================================
+# Menjalankan aplikasi + PostgreSQL + Redis dengan satu perintah:
+#   docker compose up --build
+#
+# Aplikasi jadi tersedia di http://localhost:5002
+# ===================================================================
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-campusflow}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-campusflow_dev}
+      POSTGRES_DB: ${POSTGRES_DB:-campusflow}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      # Diblokalkan ke 127.0.0.1 supaya tidak bisa diakses dari luar.
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-campusflow}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --save 60 1 --maxmemory 128mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redisdata:/data
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      FLASK_ENV: production
+      FLASK_DEBUG: "0"
+      PORT: "8000"
+      SECRET_KEY: ${SECRET_KEY:-ganti-ini-di-file-.env}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-ganti-ini-juga-di-.env}
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-campusflow}:${POSTGRES_PASSWORD:-campusflow_dev}@db:5432/${POSTGRES_DB:-campusflow}
+      RATELIMIT_STORAGE_URI: redis://redis:6379/0
+      ADMIN_API_KEY: ${ADMIN_API_KEY:-ganti-kunci-admin}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5002}
+    ports:
+      - "5002:8000"
+    volumes:
+      - ./database:/app/database
+
+volumes:
+  pgdata:
+  redisdata:
