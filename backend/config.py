@@ -12,6 +12,38 @@ import os
 from datetime import timedelta
 
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+INSTANCE_DIR = os.path.join(BASE_DIR, 'instance')
+
+
+def _absolute_sqlite_url(url):
+    """Jadikan path SQLite relatif menjadi absolut.
+
+    SQLAlchemy dan Flask-Migrate membaca path SQLite relatif dengan
+    cara berbeda: SQLAlchemy menafsirkan 'sqlite:///p.db' relatif ke
+    folder kerja terminal, sedangkan Flask-Migrate menafsirkannya
+    relatif ke instance_path. Akibatnya `flask db upgrade` menulis ke
+    instance/p.db tapi aplikasi membuka ./p.db. Dua file berbeda:
+    migrasi terlihat sukses, lalu aplikasi gagal dengan
+    "no such table".
+
+    Path relatif di sini dipindah ke folder instance/, mengikuti
+    konvensi Flask, supaya keduanya pasti menunjuk file yang sama dan
+    tidak lagi bergantung pada lokasi terminal.
+
+    Bentuk yang tidak diubah:
+        sqlite:///:memory:      database di memori
+        sqlite:////abs/path.db  path absolut (empat garis miring)
+    """
+    prefix = 'sqlite:///'
+    if not url.startswith(prefix):
+        return url
+
+    rest = url[len(prefix):]
+    if not rest or rest.startswith('/') or rest == ':memory:':
+        return url
+
+    os.makedirs(INSTANCE_DIR, exist_ok=True)
+    return f'{prefix}{os.path.join(INSTANCE_DIR, rest)}'
 
 
 def _database_url():
@@ -20,11 +52,12 @@ def _database_url():
     Format PostgreSQL:
         postgresql+psycopg://user:password@localhost:5432/nama_db
     Format SQLite:
-        sqlite:///database/campusflow.db
+        sqlite:///nama.db            -> disimpan di instance/
+        sqlite:////path/lengkap.db   -> dipakai apa adanya
     """
     url = os.environ.get('DATABASE_URL')
     if url:
-        return url
+        return _absolute_sqlite_url(url)
 
     # Default development: file SQLite di folder database/.
     # Path absolut dipakai supaya tidak salah relatif terhadap folder

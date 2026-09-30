@@ -47,6 +47,21 @@ def create_app(config_name=None):
     )
     app.config.from_object(config_name or get_config())
 
+    # Baca DATABASE_URL di sini, bukan hanya waktu modul diimpor.
+    #
+    # Nilai di kelas Config dihitung sekali saat import, jadi kalau
+    # DATABASE_URL berubah setelah import (dipakai test, atau oleh
+    # skrip yang mengubah env lebih dulu), nilainya basi. Dengan
+    # dibaca ulang di sini, env selalu sesuai kondisi saat app dibuat.
+    #
+    # TestingConfig dikecualikan: ia harus tetap memakai database di
+    # memori supaya test tidak pernah menyentuh file milik developer.
+    if not app.config.get('TESTING'):
+        from backend.config import _database_url
+
+        if os.environ.get('DATABASE_URL'):
+            app.config['SQLALCHEMY_DATABASE_URI'] = _database_url()
+
     _register_pages(app)
     _init_extensions(app)
     _register_blueprints(app)

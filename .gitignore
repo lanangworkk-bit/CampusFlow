@@ -16,6 +16,7 @@ ENV/
 *.sqlite
 *.sqlite3
 database/
+instance/
 
 # Environment variables (berisi secret!)
 .env
