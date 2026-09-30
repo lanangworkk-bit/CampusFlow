@@ -51,6 +51,8 @@ function normalizeTask(task) {
     priority: task.priority,
     status: task.status,
     progress: task.progress,
+    courseId: task.course_id || null,
+    courseName: task.course_name || "",
     createdAt: task.created_at,
   };
 }
@@ -436,6 +438,13 @@ function taskCardHTML(task) {
                     <p class="text-xs mt-1 ${isLate ? "text-red-500" : "text-gray-500 dark:text-gray-400"}">
                         📅 ${deadline}${isLate ? " - TERLAMBAT" : ""}
                     </p>
+                    ${
+                      task.courseName
+                        ? `<p class="text-xs mt-1 text-indigo-600 dark:text-indigo-400">
+                               📚 ${escapeHTML(task.courseName)}
+                           </p>`
+                        : ""
+                    }
 
                     <div class="mt-3">
                         <div class="flex justify-between text-xs text-gray-500 dark:text-gray-400 mb-1">
@@ -497,6 +506,8 @@ function addTask(event) {
     description: document.getElementById("task-description").value.trim(),
     deadline: document.getElementById("task-deadline").value,
     priority: document.getElementById("task-priority").value,
+    // String kosong berarti tidak ada mata kuliah (NULL di server).
+    course_id: document.getElementById("task-course").value || null,
   };
 
   apiCreateTask(newTask)
@@ -592,6 +603,7 @@ function openEditModal(id) {
   document.getElementById("edit-description").value = task.description || "";
   document.getElementById("edit-deadline").value = task.deadline || "";
   document.getElementById("edit-priority").value = task.priority;
+  document.getElementById("edit-course").value = task.courseId || "";
 
   const statusSelect =
     document.getElementById("edit-status") || createStatusSelect();
@@ -645,6 +657,7 @@ function saveEdit(event) {
     description: document.getElementById("edit-description").value.trim(),
     deadline: document.getElementById("edit-deadline").value,
     priority: document.getElementById("edit-priority").value,
+    course_id: document.getElementById("edit-course").value || null,
   };
 
   const statusSelect = document.getElementById("edit-status");
@@ -720,9 +733,31 @@ function renderAnalytics() {
 // 8. Courses
 // --------------------------------------------
 
+// Isi dropdown "Mata Kuliah" di form tambah dan form edit.
+// Dua dropdown memakai daftar yang sama, jadi cukup dibangun sekali.
+function renderCourseOptions() {
+  const options = getCourses()
+    .map(function (course) {
+      const label = course.code
+        ? course.name + " (" + course.code + ")"
+        : course.name;
+      return `<option value="${course.id}">${escapeHTML(label)}</option>`;
+    })
+    .join("");
+
+  const html = '<option value="">Tanpa mata kuliah</option>' + options;
+
+  ["task-course", "edit-course"].forEach(function (id) {
+    const el = document.getElementById(id);
+    if (el) el.innerHTML = html;
+  });
+}
+
 function renderCourses() {
   const listEl = document.getElementById("course-list");
   const courses = getCourses();
+
+  renderCourseOptions();
 
   if (courses.length === 0) {
     listEl.innerHTML =

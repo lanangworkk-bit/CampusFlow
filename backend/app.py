@@ -13,7 +13,7 @@ Jalankan dengan:
 
 from flask import Flask
 
-from db import init_db
+from db import init_db, run_migrations
 from routes.courses import courses_bp
 from routes.main import main_bp
 from routes.notes import notes_bp
@@ -32,4 +32,5 @@ app.register_blueprint(courses_bp)
 
 if __name__ == '__main__':
     init_db()
+    run_migrations()
     app.run(debug=True, use_reloader=False, port=5002)

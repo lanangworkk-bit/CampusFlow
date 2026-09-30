@@ -85,7 +85,7 @@
             <!-- Add Task Form -->
             <section class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-sm">
                 <h2 class="font-bold mb-4">Tambah Tugas</h2>
-                <form id="task-form" class="grid grid-cols-1 md:grid-cols-4 gap-3">
+                <form id="task-form" class="grid grid-cols-1 md:grid-cols-5 gap-3">
                     <input type="text" id="task-title" placeholder="Judul tugas" aria-label="Judul tugas" class="input">
                     <input type="text" id="task-description" placeholder="Deskripsi" aria-label="Deskripsi" class="input">
                     <input type="date" id="task-deadline" aria-label="Deadline" class="input">
@@ -95,7 +95,10 @@
                         <option value="HIGH">HIGH</option>
                         <option value="URGENT">URGENT</option>
                     </select>
-                    <div class="md:col-span-4 flex items-center gap-3">
+                    <select id="task-course" aria-label="Mata kuliah" class="input">
+                        <option value="">Tanpa mata kuliah</option>
+                    </select>
+                    <div class="md:col-span-5 flex items-center gap-3">
                         <button type="submit" class="btn-primary">Simpan Tugas</button>
                         <p id="form-error" class="text-sm text-red-500" role="alert"></p>
                     </div>
@@ -211,6 +214,9 @@
                     <option value="MEDIUM">MEDIUM</option>
                     <option value="HIGH">HIGH</option>
                     <option value="URGENT">URGENT</option>
+                </select>
+                <select id="edit-course" aria-label="Mata kuliah" class="input w-full">
+                    <option value="">Tanpa mata kuliah</option>
                 </select>
                 <div class="flex gap-2 justify-end">
                     <button type="button" id="edit-cancel" class="btn-secondary">Batal</button>
