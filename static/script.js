@@ -1,19 +1,149 @@
 // ============================================
-// CampusFlow - Semester 1 Version
-// HTML + Tailwind CSS + JavaScript + LocalStorage
+// CampusFlow - Semester 2 Version
+// HTML + Tailwind CSS + JavaScript + Flask + SQLite
 // ============================================
 
 // --------------------------------------------
-// 1. LocalStorage Helpers
+// 1. API Layer (menggantikan LocalStorage)
 // --------------------------------------------
-// LocalStorage adalah tempat menyimpan data di browser.
-// Data disimpan sebagai teks (string), jadi harus diubah
-// ke/from format JSON saat disimpan dan dibaca.
+// Data TIDAK lagi disimpan di browser.
+// Data diambil dari server lewat fetch() (HTTP request),
+// lalu disimpan sementara di memory (cache) supaya
+// kode di bawah tidak berubah banyak.
+//
+//   Browser  --fetch()-->  Flask  --sqlite3-->  database
+//
+// Catatan: darkMode tetap di LocalStorage karena itu
+// preferensi TAMPILAN per perangkat, bukan data.
+
+// Cache di memory
+let cachedTasks = [];
+let cachedCourses = [];
+let cachedNotes = [];
+
+// Pengaman: kalau server error, jangan diamkan -
+// tampilkan pesannya supaya mudah di-debug.
+function handleApiError(error) {
+  console.error("API error:", error);
+  alert("Gagal terhubung ke server. Pastikan Flask berjalan di port 5002.");
+}
+
+// Fungsi inti untuk semua request ke server.
+function api(url, options) {
+  return fetch(url, options).then(function (response) {
+    if (!response.ok) {
+      return response.json().then(function (data) {
+        throw new Error(data.error || "HTTP " + response.status);
+      });
+    }
+    return response.json();
+  });
+}
+
+// Server pakai snake_case (created_at),
+// frontend lebih nyaman pakai camelCase (createdAt).
+function normalizeTask(task) {
+  return {
+    id: task.id,
+    title: task.title,
+    description: task.description || "",
+    deadline: task.deadline || "",
+    priority: task.priority,
+    status: task.status,
+    progress: task.progress,
+    createdAt: task.created_at,
+  };
+}
+
+function normalizeNote(note) {
+  return {
+    id: note.id,
+    text: note.text,
+    createdAt: new Date(note.created_at).toLocaleDateString("id-ID"),
+  };
+}
+
+// Baca semua data dari server sekaligus.
+function loadFromServer() {
+  return Promise.all([
+    api("/api/tasks").catch(function (error) {
+      handleApiError(error);
+      return [];
+    }),
+    api("/api/courses").catch(function (error) {
+      handleApiError(error);
+      return [];
+    }),
+    api("/api/notes").catch(function (error) {
+      handleApiError(error);
+      return [];
+    }),
+  ]).then(function (results) {
+    cachedTasks = results[0].map(normalizeTask);
+    cachedCourses = results[1];
+    cachedNotes = results[2].map(normalizeNote);
+  });
+}
+
+// Pembacaan data (synchronous, dari cache)
+const getTasks = () => cachedTasks;
+const getCourses = () => cachedCourses;
+const getNotes = () => cachedNotes;
+
+// Operasi tulis ke server
+function apiCreateTask(data) {
+  return api("/api/tasks", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+}
+
+function apiUpdateTask(id, data) {
+  return api("/api/tasks/" + id, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+}
+
+function apiDeleteTask(id) {
+  return api("/api/tasks/" + id, { method: "DELETE" });
+}
+
+function apiCreateCourse(data) {
+  return api("/api/courses", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+}
+
+function apiDeleteCourse(id) {
+  return api("/api/courses/" + id, { method: "DELETE" });
+}
+
+function apiResetAll() {
+  return api("/api/reset", { method: "POST" });
+}
+
+function apiCreateNote(data) {
+  return api("/api/notes", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+}
+
+function apiDeleteNote(id) {
+  return api("/api/notes/" + id, { method: "DELETE" });
+}
+
+// --------------------------------------------
+// 1b. LocalStorage Helpers (hanya untuk settings)
+// --------------------------------------------
 
 const STORAGE_KEYS = {
-  tasks: "campusflow_tasks",
-  courses: "campusflow_courses",
-  notes: "campusflow_notes",
   settings: "campusflow_settings",
 };
 
@@ -33,15 +163,6 @@ function loadFromStorage(key, fallback) {
 function saveToStorage(key, value) {
   localStorage.setItem(key, JSON.stringify(value));
 }
-
-const getTasks = () => loadFromStorage(STORAGE_KEYS.tasks, []);
-const saveTasks = (data) => saveToStorage(STORAGE_KEYS.tasks, data);
-
-const getCourses = () => loadFromStorage(STORAGE_KEYS.courses, []);
-const saveCourses = (data) => saveToStorage(STORAGE_KEYS.courses, data);
-
-const getNotes = () => loadFromStorage(STORAGE_KEYS.notes, []);
-const saveNotes = (data) => saveToStorage(STORAGE_KEYS.notes, data);
 
 const getSettings = () =>
   loadFromStorage(STORAGE_KEYS.settings, { darkMode: false });
@@ -115,78 +236,100 @@ const statusColor = (s) => {
 // 3. Data Awal (hanya sekali, jika storage kosong)
 // --------------------------------------------
 
+// --------------------------------------------
+// 3. Data Awal (disimpan ke server, hanya sekali)
+// --------------------------------------------
+// Sekarang data awal dikirim ke server lewat API,
+// bukan disimpan di LocalStorage.
+// Kalau database masih kosong, isi dengan contoh.
+// Kalau sudah ada, lewati saja.
+
 function seedIfEmpty() {
-  if (getTasks().length === 0 && !localStorage.getItem("campusflow_seeded")) {
+  if (getTasks().length === 0) {
     const sample = [
       {
-        id: 1,
         title: "Tugas Pemrograman Dasar",
         description: "Buat program kalkulator sederhana",
         deadline: offsetDate(2),
         priority: "HIGH",
-        status: "IN PROGRESS",
-        progress: 40,
-        createdAt: new Date().toISOString(),
       },
       {
-        id: 2,
         title: "Laporan Praktikum Matematika",
         description: "Laporan modul integral",
         deadline: offsetDate(6),
         priority: "MEDIUM",
-        status: "TODO",
-        progress: 0,
-        createdAt: new Date().toISOString(),
       },
       {
-        id: 3,
         title: "Presentasi Basis Data",
-        description: "Slide_normalisasi relasi",
+        description: "Slide normalisasi relasi",
         deadline: offsetDate(-2),
         priority: "URGENT",
-        status: "TODO",
-        progress: 10,
-        createdAt: new Date().toISOString(),
       },
     ];
-    saveTasks(sample);
-    localStorage.setItem("campusflow_seeded", "true");
-  }
 
-  if (getCourses().length === 0) {
-    saveCourses([
-      {
-        id: 1,
-        name: "Pemrograman Dasar",
-        code: "IF101",
-        sks: 3,
-        lecturer: "Budi Santoso, S.T.",
-        day: "Senin",
-        time: "08:00 - 10:30",
-        room: "Lab Informatika",
-      },
-      {
-        id: 2,
-        name: "Matematika Diskret",
-        code: "IF102",
-        sks: 3,
-        lecturer: "Siti Aminah, S.Si.",
-        day: "Selasa",
-        time: "10:00 - 12:30",
-        room: "Ruang 301",
-      },
-      {
-        id: 3,
-        name: "Basis Data",
-        code: "IF103",
-        sks: 4,
-        lecturer: "Andi Wijaya, S.Kom.",
-        day: "Kamis",
-        time: "13:00 - 16:00",
-        room: "Lab Data",
-      },
-    ]);
+    // Kirim satu per satu, lalu render setelah semua selesai
+    return Promise.all(sample.map(apiCreateTask))
+      .then(function (created) {
+        created.forEach(function (task) {
+          cachedTasks.push(normalizeTask(task));
+        });
+      })
+      .then(function () {
+        cachedTasks[0].status = "IN PROGRESS";
+        cachedTasks[0].progress = 40;
+        cachedTasks[2].progress = 10;
+        return Promise.all([
+          apiUpdateTask(cachedTasks[0].id, {
+            status: "IN PROGRESS",
+            progress: 40,
+          }),
+          apiUpdateTask(cachedTasks[2].id, { progress: 10 }),
+        ]);
+      })
+      .then(function () {
+        return loadFromServer();
+      });
   }
+}
+
+function seedCoursesIfEmpty() {
+  if (getCourses().length > 0) return Promise.resolve();
+
+  const sample = [
+    {
+      name: "Pemrograman Dasar",
+      code: "IF101",
+      sks: 3,
+      lecturer: "Budi Santoso, S.T.",
+      day: "Senin",
+      time: "08:00 - 10:30",
+      room: "Lab Informatika",
+    },
+    {
+      name: "Matematika Diskret",
+      code: "IF102",
+      sks: 3,
+      lecturer: "Siti Aminah, S.Si.",
+      day: "Selasa",
+      time: "10:00 - 12:30",
+      room: "Ruang 301",
+    },
+    {
+      name: "Basis Data",
+      code: "IF103",
+      sks: 4,
+      lecturer: "Andi Wijaya, S.Kom.",
+      day: "Kamis",
+      time: "13:00 - 16:00",
+      room: "Lab Data",
+    },
+  ];
+
+  return Promise.all(sample.map(apiCreateCourse))
+    .then(function (created) {
+      cachedCourses = created;
+    })
+    .catch(handleApiError);
 }
 
 function offsetDate(days) {
@@ -336,53 +479,50 @@ function addTask(event) {
 
   errorEl.textContent = "";
 
-  const tasks = getTasks();
   const newTask = {
-    id: Date.now(),
     title: title,
     description: document.getElementById("task-description").value.trim(),
     deadline: document.getElementById("task-deadline").value,
     priority: document.getElementById("task-priority").value,
-    status: "TODO",
-    progress: 0,
-    createdAt: new Date().toISOString(),
   };
 
-  tasks.push(newTask);
-  saveTasks(tasks);
-
-  event.target.reset();
-  refresh();
+  apiCreateTask(newTask)
+    .then(function (task) {
+      cachedTasks.push(normalizeTask(task));
+      event.target.reset();
+      refresh();
+    })
+    .catch(handleApiError);
 }
 
 function toggleTask(id) {
-  const tasks = getTasks();
-  const task = tasks.find(function (t) {
+  const task = getTasks().find(function (t) {
     return t.id == id;
   });
 
   if (!task) return;
 
-  if (task.status === "COMPLETED") {
-    task.status = "TODO";
-    task.progress = 0;
-  } else {
-    task.status = "COMPLETED";
-    task.progress = 100;
-  }
+  const nextStatus = task.status === "COMPLETED" ? "TODO" : "COMPLETED";
 
-  saveTasks(tasks);
-  refresh();
+  apiUpdateTask(id, { status: nextStatus })
+    .then(function (updated) {
+      const index = cachedTasks.findIndex(function (t) {
+        return t.id == id;
+      });
+      if (index !== -1) cachedTasks[index] = normalizeTask(updated);
+      refresh();
+    })
+    .catch(handleApiError);
 }
 
 function updateProgress(id, value) {
-  const tasks = getTasks();
-  const task = tasks.find(function (t) {
+  const task = getTasks().find(function (t) {
     return t.id == id;
   });
 
   if (!task) return;
 
+  // Update tampilan lebih dulu supaya slider tidak lag
   task.progress = Number(value);
 
   if (task.progress === 100) {
@@ -390,8 +530,6 @@ function updateProgress(id, value) {
   } else if (task.status === "COMPLETED") {
     task.status = "IN PROGRESS";
   }
-
-  saveTasks(tasks);
 
   // Jangan render ulang seluruh list, karena slider yang sedang
   // di-drag akan ikut hilang. Update langsung elemennya saja.
@@ -407,40 +545,47 @@ function updateProgress(id, value) {
 
   renderStats();
   renderAnalytics();
+
+  // Kirim ke server (tanpa render ulang list)
+  apiUpdateTask(id, { progress: task.progress, status: task.status }).catch(
+    handleApiError,
+  );
 }
 
 function deleteTask(id) {
-  const tasks = getTasks();
-  const task = tasks.find(function (t) {
+  const task = getTasks().find(function (t) {
     return t.id == id;
   });
 
   if (!task) return;
   if (!window.confirm('Hapus tugas "' + task.title + '"?')) return;
 
-  saveTasks(
-    tasks.filter(function (t) {
-      return t.id != id;
-    }),
-  );
-  refresh();
+  apiDeleteTask(id)
+    .then(function () {
+      cachedTasks = cachedTasks.filter(function (t) {
+        return t.id != id;
+      });
+      refresh();
+    })
+    .catch(handleApiError);
 }
 
 function updateStatus(id, newStatus) {
-  const tasks = getTasks();
-  const task = tasks.find(function (t) {
+  const task = getTasks().find(function (t) {
     return t.id == id;
   });
 
   if (!task) return;
 
-  task.status = newStatus;
-  if (newStatus === "COMPLETED") {
-    task.progress = 100;
-  }
-
-  saveTasks(tasks);
-  refresh();
+  apiUpdateTask(id, { status: newStatus })
+    .then(function (updated) {
+      const index = cachedTasks.findIndex(function (t) {
+        return t.id == id;
+      });
+      if (index !== -1) cachedTasks[index] = normalizeTask(updated);
+      refresh();
+    })
+    .catch(handleApiError);
 }
 
 // --------------------------------------------
@@ -501,26 +646,33 @@ function saveEdit(event) {
     return;
   }
 
-  const tasks = getTasks();
-  const task = tasks.find(function (t) {
+  const task = getTasks().find(function (t) {
     return t.id === id;
   });
   if (!task) return;
 
-  task.title = title;
-  task.description = document.getElementById("edit-description").value.trim();
-  task.deadline = document.getElementById("edit-deadline").value;
-  task.priority = document.getElementById("edit-priority").value;
+  const changes = {
+    title: title,
+    description: document.getElementById("edit-description").value.trim(),
+    deadline: document.getElementById("edit-deadline").value,
+    priority: document.getElementById("edit-priority").value,
+  };
 
   const statusSelect = document.getElementById("edit-status");
   if (statusSelect) {
-    task.status = statusSelect.value;
-    if (task.status === "COMPLETED") task.progress = 100;
+    changes.status = statusSelect.value;
   }
 
-  saveTasks(tasks);
-  closeEditModal();
-  refresh();
+  apiUpdateTask(id, changes)
+    .then(function (updated) {
+      const index = cachedTasks.findIndex(function (t) {
+        return t.id === id;
+      });
+      if (index !== -1) cachedTasks[index] = normalizeTask(updated);
+      closeEditModal();
+      refresh();
+    })
+    .catch(handleApiError);
 }
 
 // --------------------------------------------
@@ -733,25 +885,24 @@ function addNote(event) {
 
   if (text === "") return;
 
-  const notes = getNotes();
-  notes.unshift({
-    id: Date.now(),
-    text: text,
-    createdAt: new Date().toLocaleDateString("id-ID"),
-  });
-  saveNotes(notes);
-
-  event.target.reset();
-  renderNotes();
+  apiCreateNote({ text: text })
+    .then(function (note) {
+      cachedNotes.unshift(normalizeNote(note));
+      event.target.reset();
+      renderNotes();
+    })
+    .catch(handleApiError);
 }
 
 function deleteNote(id) {
-  saveNotes(
-    getNotes().filter(function (note) {
-      return note.id != id;
-    }),
-  );
-  renderNotes();
+  apiDeleteNote(id)
+    .then(function () {
+      cachedNotes = cachedNotes.filter(function (note) {
+        return note.id != id;
+      });
+      renderNotes();
+    })
+    .catch(handleApiError);
 }
 
 // --------------------------------------------
@@ -866,8 +1017,6 @@ function refresh() {
 }
 
 function init() {
-  seedIfEmpty();
-
   applyTheme(getSettings().darkMode);
   renderGreeting();
 
@@ -909,11 +1058,12 @@ function init() {
       )
     )
       return;
-    Object.values(STORAGE_KEYS).forEach(function (key) {
-      localStorage.removeItem(key);
-    });
-    localStorage.removeItem("campusflow_seeded");
-    window.location.reload();
+    apiResetAll()
+      .then(function () {
+        localStorage.removeItem(STORAGE_KEYS.settings);
+        window.location.reload();
+      })
+      .catch(handleApiError);
   });
 
   document
@@ -931,12 +1081,21 @@ function init() {
   setupMobileMenu();
   setupTaskList();
 
-  renderTasks();
-  renderStats();
-  renderAnalytics();
-  renderCourses();
-  renderNotes();
-  renderCalendar();
+  // Data harus dimuat dari server DULUAN, baru render.
+  // Kalau render duluan, halaman akan tampil kosong
+  // lalu berubah sendiri setelah server menjawab (flicker).
+  loadFromServer()
+    .then(seedIfEmpty)
+    .then(seedCoursesIfEmpty)
+    .then(function () {
+      renderTasks();
+      renderStats();
+      renderAnalytics();
+      renderCourses();
+      renderNotes();
+      renderCalendar();
+    })
+    .catch(handleApiError);
 }
 
 document.addEventListener("DOMContentLoaded", init);

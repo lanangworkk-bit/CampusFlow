@@ -6,6 +6,148 @@ Aplikasi web untuk membantu mahasiswa mengelola kehidupan akademik dan aktivitas
 
 ---
 
+## 🎓 Semester 2 — Flask + Database (branch `semester-2`)
+
+Versi ini adalah **lanjutan** dari Semester 1. Semua fitur Semester 1 tetap ada,
+tapi penyimpanan datanya pindah dari LocalStorage ke **server + database**.
+
+### Apa yang Berubah?
+
+| | Semester 1 (`main`) | Semester 2 (`semester-2`) |
+|---|---|---|
+| Penyimpanan | LocalStorage (di browser) | SQLite (di server) |
+| Backend | Tidak ada | Flask |
+| Data | Hilang kalau cache dibersihkan | Permanen |
+| Akses | Cuma 1 browser | Browser manapun |
+| Dark mode | LocalStorage | Tetap LocalStorage (preferensi perangkat) |
+
+### Tech Stack (Semester 2)
+
+```
+HTML5          - Struktur halaman
+Tailwind CSS   - Styling (via CDN)
+JavaScript     - Logika aplikasi + fetch() untuk API
+Python         - Bahasa backend
+Flask          - Web framework
+SQLite         - Database
+Jinja2         - Template engine Flask
+```
+
+### Project Structure (Semester 2)
+
+```
+CampusFlow/
+├── templates/
+│   └── index.html          # Template Jinja2
+├── static/
+│   ├── script.js           # Logika + API calls
+│   └── style.css           # Custom CSS
+├── backend/
+│   └── app.py              # Server Flask + REST API
+├── database/
+│   └── campusflow.db       # Database SQLite (tidak di-commit)
+├── requirements.txt        # Daftar dependency
+└── README.md
+```
+
+### Installation (Semester 2)
+
+Pastikan Python 3 sudah terinstall.
+
+```bash
+git clone https://github.com/lanangworkk-bit/CampusFlow.git
+cd CampusFlow
+git checkout semester-2
+
+# Buat virtual environment
+python3 -m venv venv
+source venv/bin/activate
+
+# Install dependencies
+pip install -r requirements.txt
+```
+
+### How to Run (Semester 2)
+
+```bash
+source venv/bin/activate      # aktifkan venv
+python backend/app.py
+```
+
+Lalu buka di browser: **http://localhost:5002**
+
+Database akan dibuat otomatis saat pertama kali server jalan.
+
+> **Penting:** halaman **HARUS** dibuka lewat `http://localhost:5002`,
+> bukan klik dua kali `index.html`. Alasannya, `fetch()` butuh alamat server
+> untuk mengambil data. Jika dibuka sebagai `file:///`, browser tidak bisa
+> menghubungi database.
+
+### REST API
+
+| Method | URL | Fungsi |
+|---|---|---|
+| `GET` | `/api/tasks` | Ambil semua task |
+| `POST` | `/api/tasks` | Tambah task baru |
+| `PUT` | `/api/tasks/<id>` | Update task |
+| `DELETE` | `/api/tasks/<id>` | Hapus task |
+| `GET` | `/api/courses` | Ambil semua mata kuliah |
+| `POST` | `/api/courses` | Tambah mata kuliah |
+| `DELETE` | `/api/courses/<id>` | Hapus mata kuliah |
+| `GET` | `/api/notes` | Ambil semua catatan |
+| `POST` | `/api/notes` | Tambah catatan |
+| `DELETE` | `/api/notes/<id>` | Hapus catatan |
+| `POST` | `/api/reset` | Hapus semua data |
+
+**Test API tanpa browser** — buka `http://localhost:5002/api/tasks` di browser,
+atau pakai `curl` di terminal:
+
+```bash
+curl http://localhost:5002/api/tasks
+
+curl -X POST http://localhost:5002/api/tasks \
+  -H "Content-Type: application/json" \
+  -d '{"title":"Belajar Flask","deadline":"2026-10-20","priority":"HIGH"}'
+```
+
+### Konsep yang Dipelajari di Semester 2
+
+1. **Flask** — membuat server, route, dan request handler
+2. **REST API** — communicates antara frontend dan backend lewat HTTP
+3. **JSON** — format pertukaran data (Python `dict` ↔ JavaScript `object`)
+4. **Parameterized Query** — mencegah SQL Injection (`?` placeholder)
+5. **Primary Key & AUTOINCREMENT** — identitas unik tiap baris
+6. **CRUD** — Create, Read, Update, Delete
+7. **Status Code** — 200 OK, 201 Created, 400 Bad Request, 404 Not Found
+8. **Async/Await mental model** — `fetch()` butuh waktu, data belum tersedia
+   saat pertama dipanggil
+9. **Cache di memory** — hasil `fetch` disimpan sementara supaya kode
+  渲染 tidak harus async di mana-mana
+10. **Business Logic di server** — aturan bisnis (misal `COMPLETED` →
+    `progress = 100`) ditulis di backend, bukan frontend
+
+### Contoh Alur Request
+
+```
+User klik tombol "Tambah Task"
+        ↓
+JavaScript: fetch('/api/tasks', { method: 'POST', body: {...} })
+        ↓
+Browser mengirim HTTP request ke server
+        ↓
+Flask menerima di route create_task()
+        ↓
+app.py menjalankan INSERT INTO tasks ... ? (query aman dari SQL Injection)
+        ↓
+SQLite menyimpan data, db.commit()
+        ↓
+Flask balas JSON: { "id": 7, "title": "...", ... }
+        ↓
+JavaScript: .then() → masukkan ke cache → render ulang tampilan
+```
+
+---
+
 ## Fitur (Semester 1)
 
 | Modul | Fitur |
@@ -27,7 +169,16 @@ Aplikasi web untuk membantu mahasiswa mengelola kehidupan akademik dan aktivitas
 
 ---
 
-## Tech Stack
+## ⚠️ Versi Semester 1 (branch `main`)
+
+Semua isi README di bawah ini menggambarkan **Semester 1** versi yang ada di branch `main`:
+frontend murni tanpa backend.
+
+Untuk versi **Semester 2** (Flask + database), pindah ke branch `semester-2`.
+
+---
+
+## Tech Stack (Semester 1)
 
 ```
 HTML5          - Struktur halaman
@@ -41,7 +192,7 @@ Git & GitHub   - Version control
 
 ---
 
-## Project Structure
+## Project Structure (Semester 1)
 
 ```
 CampusFlow/
@@ -55,20 +206,20 @@ CampusFlow/
 
 ---
 
-## Installation
+## Installation (Semester 1)
 
 Tidak ada yang perlu di-install.
 
 **Clone repository:**
 
 ```bash
-git clone https://github.com/USERNAME/CampusFlow.git
+git clone https://github.com/lanangworkk-bit/CampusFlow.git
 cd CampusFlow
 ```
 
 ---
 
-## How to Run
+## How to Run (Semester 1)
 
 **Cara termudah:**
 
@@ -81,7 +232,7 @@ Klik dua kali `index.html`. Selesai.
 
 ---
 
-## Fitur Bonus: Lihat Data LocalStorage
+## Fitur Bonus: Lihat Data LocalStorage (Semester 1)
 
 Untuk belajar, buka Browser Console (`Cmd + Option + I` di Mac, `F12` di Windows) lalu ketik:
 

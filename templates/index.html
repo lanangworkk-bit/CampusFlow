@@ -11,7 +11,7 @@
             darkMode: 'class',
         }
     </script>
-    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body class="min-h-screen bg-gray-50 text-gray-900 dark:bg-gray-900 dark:text-gray-100 transition-colors">
 
@@ -212,6 +212,6 @@
         </div>
     </div>
 
-    <script src="assets/script.js"></script>
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
 </body>
 </html>
