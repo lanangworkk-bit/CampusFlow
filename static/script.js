@@ -20,6 +20,10 @@
 let cachedTasks = [];
 let cachedCourses = [];
 let cachedNotes = [];
+let cachedCourseOptions = [];
+let coursePage = { page: 1, total: 0, totalPages: 1, hasPrev: false, hasNext: false };
+let courseFilters = { search: "", sort: "name", order: "asc", perPage: 6 };
+let courseFilterTimer = null;
 
 // Pengaman: kalau server error, jangan diamkan -
 // tampilkan pesannya supaya mudah di-debug.
@@ -72,7 +76,13 @@ function loadFromServer() {
       handleApiError(error);
       return [];
     }),
-    api("/api/courses").catch(function (error) {
+    // Daftar mata kuliah (berhalaman, untuk ditampilkan)
+    loadCourses().catch(function (error) {
+      handleApiError(error);
+      return null;
+    }),
+    // Semua mata kuliah (untuk dropdown, tidak dipaginasi)
+    api("/api/courses/options").catch(function (error) {
       handleApiError(error);
       return [];
     }),
@@ -82,9 +92,41 @@ function loadFromServer() {
     }),
   ]).then(function (results) {
     cachedTasks = results[0].map(normalizeTask);
-    cachedCourses = results[1];
-    cachedNotes = results[2].map(normalizeNote);
+    cachedCourses = results[1] ? results[1].items : [];
+    cachedCourseOptions = results[2];
+    cachedNotes = results[3].map(normalizeNote);
   });
+}
+
+// Ambil daftar mata kuliah yang sedang ditampilkan.
+function loadCourses() {
+  const params = new URLSearchParams();
+  if (courseFilters.search) params.set("search", courseFilters.search);
+  params.set("sort", courseFilters.sort);
+  params.set("order", courseFilters.order);
+  params.set("page", coursePage.page);
+  params.set("per_page", courseFilters.perPage);
+
+  return api("/api/courses?" + params.toString()).then(function (payload) {
+    cachedCourses = payload.items;
+    coursePage = {
+      page: payload.page,
+      total: payload.total,
+      totalPages: payload.total_pages,
+      hasPrev: payload.has_prev,
+      hasNext: payload.has_next,
+    };
+    renderCourses();
+  });
+}
+
+// Sama seperti filter task: tunggu user berhenti mengetik.
+function applyCourseFilters() {
+  clearTimeout(courseFilterTimer);
+  courseFilterTimer = setTimeout(function () {
+    coursePage.page = 1;
+    loadCourses().catch(handleApiError);
+  }, 300);
 }
 
 // Pembacaan data (synchronous, dari cache)
@@ -328,8 +370,16 @@ function seedCoursesIfEmpty() {
   ];
 
   return Promise.all(sample.map(apiCreateCourse))
-    .then(function (created) {
-      cachedCourses = created;
+    .then(function () {
+      // Ambil ulang dari server supaya halaman dan dropdown
+      // sama-sama ikut terisi.
+      return loadCourses();
+    })
+    .then(function () {
+      return api("/api/courses/options").then(function (options) {
+        cachedCourseOptions = options;
+        renderCourseOptions();
+      });
     })
     .catch(handleApiError);
 }
@@ -824,9 +874,11 @@ function renderAnalytics() {
 // --------------------------------------------
 
 // Isi dropdown "Mata Kuliah" di form tambah dan form edit.
-// Dua dropdown memakai daftar yang sama, jadi cukup dibangun sekali.
+// Pakai cachedCourseOptions (semua mata kuliah), bukan cachedCourses
+// (hanya halaman yang sedang tampil). Kalau pakai cachedCourses,
+// mata kuliah di halaman 2 tidak akan pernah bisa dipilih.
 function renderCourseOptions() {
-  const options = getCourses()
+  const options = cachedCourseOptions
     .map(function (course) {
       const label = course.code
         ? course.name + " (" + course.code + ")"
@@ -843,15 +895,66 @@ function renderCourseOptions() {
   });
 }
 
+function renderCoursePagination() {
+  const el = document.getElementById("course-pagination");
+  if (!el) return;
+
+  if (coursePage.total === 0) {
+    el.innerHTML = "";
+    return;
+  }
+
+  const from = (coursePage.page - 1) * courseFilters.perPage + 1;
+  const to = Math.min(
+    coursePage.page * courseFilters.perPage,
+    coursePage.total,
+  );
+
+  el.innerHTML = `
+    <p class="text-xs text-gray-500 dark:text-gray-400">
+      Menampilkan ${from}-${to} dari ${coursePage.total} mata kuliah
+    </p>
+    <div class="flex items-center gap-2">
+      <button type="button" id="course-prev" class="btn-secondary text-xs"
+        ${coursePage.hasPrev ? "" : "disabled"}>&larr; Sebelumnya</button>
+      <span class="text-xs text-gray-500 dark:text-gray-400">
+        Halaman ${coursePage.page} / ${coursePage.totalPages}
+      </span>
+      <button type="button" id="course-next" class="btn-secondary text-xs"
+        ${coursePage.hasNext ? "" : "disabled"}>Berikutnya &rarr;</button>
+    </div>
+  `;
+
+  const prev = document.getElementById("course-prev");
+  const next = document.getElementById("course-next");
+
+  if (prev) {
+    prev.addEventListener("click", function () {
+      if (!coursePage.hasPrev) return;
+      coursePage.page -= 1;
+      loadCourses().catch(handleApiError);
+    });
+  }
+  if (next) {
+    next.addEventListener("click", function () {
+      if (!coursePage.hasNext) return;
+      coursePage.page += 1;
+      loadCourses().catch(handleApiError);
+    });
+  }
+}
+
 function renderCourses() {
   const listEl = document.getElementById("course-list");
   const courses = getCourses();
 
   renderCourseOptions();
+  renderCoursePagination();
 
   if (courses.length === 0) {
-    listEl.innerHTML =
-      '<p class="text-sm text-gray-500 dark:text-gray-400">Belum ada mata kuliah.</p>';
+    listEl.innerHTML = courseFilters.search
+      ? `<p class="text-sm text-gray-500 dark:text-gray-400">Tidak ada mata kuliah yang cocok dengan "${escapeHTML(courseFilters.search)}".</p>`
+      : '<p class="text-sm text-gray-500 dark:text-gray-400">Belum ada mata kuliah.</p>';
     return;
   }
 
@@ -872,6 +975,13 @@ function renderCourses() {
                 <p class="text-xs text-gray-500 dark:text-gray-400 mt-2">${escapeHTML(course.lecturer)}</p>
                 <p class="text-xs text-gray-500 dark:text-gray-400">${escapeHTML(course.day)} - ${escapeHTML(course.time)}</p>
                 <p class="text-xs text-gray-400 dark:text-gray-500">${escapeHTML(course.room)}</p>
+                ${
+                  course.task_count
+                    ? `<p class="text-xs mt-2 text-indigo-600 dark:text-indigo-400">
+                           ${course.task_count} tugas · ${course.task_done} selesai
+                       </p>`
+                    : ""
+                }
             </div>
         `,
     );
@@ -1188,6 +1298,30 @@ function init() {
     );
     applyFilters(true);
   });
+
+  // Pencarian mata kuliah (debounce, sama seperti pencarian task)
+  document
+    .getElementById("course-search")
+    .addEventListener("input", function () {
+      courseFilters.search = this.value.trim();
+      applyCourseFilters();
+    });
+
+  document
+    .getElementById("course-sort")
+    .addEventListener("change", function () {
+      courseFilters.sort = this.value;
+      coursePage.page = 1;
+      loadCourses().catch(handleApiError);
+    });
+
+  document
+    .getElementById("course-order")
+    .addEventListener("change", function () {
+      courseFilters.order = this.value;
+      coursePage.page = 1;
+      loadCourses().catch(handleApiError);
+    });
   document
     .getElementById("setting-dark-mode")
     .addEventListener("change", function (event) {

@@ -140,8 +140,24 @@
 
             <!-- Course List -->
             <section id="courses" class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-sm">
-                <h2 class="font-bold mb-4">Mata Kuliah</h2>
+                <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+                    <h2 class="font-bold">Mata Kuliah</h2>
+                    <div class="flex gap-2">
+                        <input type="search" id="course-search" placeholder="Cari mata kuliah..." aria-label="Cari mata kuliah" class="input w-48">
+                        <select id="course-sort" aria-label="Urutkan mata kuliah" class="input w-40">
+                            <option value="name">Nama</option>
+                            <option value="code">Kode</option>
+                            <option value="sks">SKS</option>
+                            <option value="day">Hari</option>
+                        </select>
+                        <select id="course-order" aria-label="Arah urutan" class="input w-16">
+                            <option value="asc">A-Z</option>
+                            <option value="desc">Z-A</option>
+                        </select>
+                    </div>
+                </div>
                 <div id="course-list" class="grid grid-cols-1 sm:grid-cols-2 gap-3" aria-live="polite"></div>
+                <div id="course-pagination" class="flex items-center justify-between mt-4"></div>
             </section>
 
             <!-- Calendar -->
