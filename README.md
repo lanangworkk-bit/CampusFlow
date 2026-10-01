@@ -155,6 +155,37 @@ Test mencakup autentikasi dan peran, filter dan paginasi, nilai
 batas, kepemilikan data antar pengguna, sanitasi input, dan batas
 waktu respons.
 
+### Test browser
+
+Suite di atas membalas endpoint dan memeriksa JSON-nya. Itu belum
+membuktikan apa pun soal halaman yang benar-benar dibuka user: salah
+satu `id` yang salah tulis di template, satu handler yang tidak
+terpasang, atau satu error JavaScript akan lolos semuanya, padahal
+halamannya hancur.
+
+`tests/test_browser.py` menutup celah itu. Chromium sungguhan
+dibuka, form diisi, tombol diklik, dan yang muncul di layar diperiksa.
+Setiap error console dan request gagal ke `/api/` dianggap kegagalan,
+jadi error frontend tidak bisa lolos diam-diam.
+
+```bash
+source venv/bin/activate
+pip install playwright
+python -m playwright install chromium
+python3 -m pytest tests/test_browser.py -v
+```
+
+Kalau Playwright atau Chromium belum terpasang, file ini otomatis
+dilewati, bukan gagal. Jalankan hanya yang browser:
+
+```bash
+python3 -m pytest -m browser -v
+```
+
+Jadi CI punya job `Test Browser` tersendiri. Job `Build Docker Image`
+menunggu job itu selesai, jadi image tidak dipromosikan kalau
+halamannya rusak.
+
 ## Deployment
 
 ```bash

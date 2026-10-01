@@ -28,3 +28,9 @@ gunicorn==26.2.0
 
 # Testing
 pytest==9.1.1
+
+# Uji browser (test_browser.py). Chromium-nya diunduh terpisah dengan:
+#   python -m playwright install chromium
+# File ini dilewati kalau Playwright tidak terpasang, jadi test ini tetap
+# bisa berjalan di lingkungan tanpa browser.
+playwright==1.63.0
