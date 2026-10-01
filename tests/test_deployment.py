@@ -121,6 +121,42 @@ class TestDockerfile:
         assert 'HEALTHCHECK' in dockerfile
         assert '/api/health' in dockerfile
 
+    def test_user_ada_folder_home(self, dockerfile):
+        """appuser harus punya folder home sendiri.
+
+        Gunicorn membuat socket kontrol di $HOME/.gunicorn/. Tanpa -m
+        pada useradd, folder home tidak dibuat, /home dimiliki root, dan
+        arbiter mencatat "Control server error: [Errno 13] Permission
+        denied: '/home/appuser'". Worker tetap jalan, tapi `gunicorn ctl`
+        untuk graceful reload tidak bisa dipakai.
+        """
+        baris_useradd = [
+            baris for baris in dockerfile.split('\n')
+            if 'useradd' in baris and 'appuser' in baris
+        ]
+        assert baris_useradd, 'tidak ada perintah useradd untuk appuser'
+
+        assert any('-m' in baris.split() for baris in baris_useradd), (
+            'useradd tanpa -m: appuser tidak punya folder home, '
+            'sehingga socket kontrol Gunicorn gagal dibuat'
+        )
+
+
+class TestKetergantunganRedis:
+    """Rate limit di Compose memakai Redis, jadi kliennya harus ada."""
+
+    @pytest.fixture(scope='class')
+    def requirements(self):
+        return (PROJECT_ROOT / 'requirements.txt').read_text()
+
+    def test_paket_redis_tercantum(self, requirements):
+        assert 'redis' in requirements, (
+            'Flask-Limiter tidak membawa klien Redis. Tanpa paket redis, '
+            'container gagal start dengan "redis prerequisite not available" '
+            'karena docker-compose.yml mengisi RATELIMIT_STORAGE_URI '
+            'dengan redis://'
+        )
+
 
 class TestCompose:
     @pytest.fixture(scope='class')

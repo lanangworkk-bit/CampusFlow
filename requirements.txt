@@ -15,6 +15,14 @@ Werkzeug==3.1.9
 Flask-Cors==6.0.5
 Flask-Limiter==4.1.1
 
+# Klien Redis untuk rate limit.
+#
+# Flask-Limiter tidak membawa klien Redis. Tanpa paket ini, container
+# gagal start dengan "redis prerequisite not available" kalau
+# RATELIMIT_STORAGE_URI diisi redis://. Wajib karena docker-compose.yml
+# memakai Redis untuk rate limit.
+redis==7.1.1
+
 # Production
 gunicorn==26.2.0
 

@@ -41,7 +41,14 @@ RUN apt-get update \
 
 # User non-root: kalau container berhasil ditembus, attacker tidak
 # langsung dapat akses root di dalam container.
-RUN groupadd -r appuser && useradd -r -g appuser appuser
+#
+# -m itu penting, bukan ACCESSORI. Tanpa folder home, Gunicorn tidak
+# bisa membuat socket kontrolnya di $HOME/.gunicorn/ karena /home
+# dimiliki root, lalu arbiter mencatat
+# "Control server error: [Errno 13] Permission denied: '/home/appuser'".
+# Worker tetap jalan, tapi perintah `gunicorn ctl` jadi tidak bisa dipakai
+# untuk graceful reload.
+RUN groupadd -r appuser && useradd -r -m -g appuser appuser
 
 WORKDIR /app
 
