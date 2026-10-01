@@ -13,11 +13,16 @@ Yang tersedia:
 from collections import Counter
 from datetime import date, datetime, timedelta
 
+from sqlalchemy import and_, case, func
+
 from backend.extensions import db
 from backend.models import Course, Note, Task, today, utcnow
 
 
 # ---------------------------------------------------------------- statistik
+
+TANPA_MATA_KULIAH = 'Tanpa Mata Kuliah'
+
 
 def _pct(numerator, denominator):
     """Persentase, aman dari pembagian dengan nol."""
@@ -26,38 +31,65 @@ def _pct(numerator, denominator):
     return round((numerator / denominator) * 100, 1)
 
 
+def effective_status_sql():
+    """Versi SQL dari Task.effective_status().
+
+    OVERDUE tidak pernah tersimpan di database; dia dihitung dari
+    perbandingan deadline dengan tanggal sekarang. CASE di sini
+    meniru aturan yang sama supaya agregasi di database dan perhitungan
+    per-objek di Python selalu memberi angka yang sama.
+    """
+    return case(
+        (
+            and_(
+                Task.status != 'COMPLETED',
+                Task.deadline.isnot(None),
+                Task.deadline < today(),
+            ),
+            'OVERDUE',
+        ),
+        (Task.status == 'COMPLETED', 'COMPLETED'),
+        else_=Task.status,
+    )
+
+
 def summary(user_id=None):
-    query = Task.query
-    if user_id:
-        query = query.filter_by(user_id=user_id)
-
-    tasks = query.all()
-    total = len(tasks)
-
-    # Hitung dari effective_status(), bukan dari kolom status mentah.
+    # Agregasi dikerjakan database, bukan Python.
     #
-    # Status OVERDUE tidak pernah tersimpan di database; dia dihitung
-    # dari perbandingan deadline dengan tanggal sekarang. Kalau
-    # in_progress dan todo dihitung dari kolom mentah, sebuah tugas
-    # yang lewat tenggat akan terhitung di OVERDUE sekaligus di
-    # IN PROGRESS, sehingga jumlah status melebihi total tugas.
+    # Dulu semua baris dimuat dulu dengan query.all() lalu dihitung di
+    # sini. Itu benar, tapi memuat 40.000 objek ORM hanya untuk
+    # menjumlahkannya boros: yang diperlukan sebenarnya enam angka.
+    # Dengan SUM(CASE ...) database hanya mengirim enam angka itu, jadi
+    # tidak ada ribuan objek yang melewati jaringan.
     #
-    # Dengan effective_status(), keempat status ini saling lepas dan
-    # jumlahannya selalu sama dengan total.
-    buckets = {'COMPLETED': 0, 'OVERDUE': 0, 'IN PROGRESS': 0, 'TODO': 0}
-    for task in tasks:
-        status = task.effective_status()
-        if status in buckets:
-            buckets[status] += 1
-        else:
-            buckets['TODO'] += 1
+    # Keempat status tetap saling lepas karenaeffective_status_sql()
+    # memakai aturan yang sama persis dengan effective_status(): tugas
+    # yang lewat tenggat masuk OVERDUE, bukan juga IN PROGRESS, sehingga
+    # jumlah status selalu sama dengan total.
+    status_sql = effective_status_sql()
 
-    done = buckets['COMPLETED']
-    overdue = buckets['OVERDUE']
-    in_progress = buckets['IN PROGRESS']
-    todo = buckets['TODO']
+    query = db.select(
+        func.count(Task.id),
+        func.coalesce(func.sum(Task.progress), 0),
+        # SUM(CASE) mengembalikan NULL kalau tidak ada baris sama sekali,
+        # jadi setiap SUM dibungkus coalesce agar hasilnya 0, bukan None.
+        func.coalesce(func.sum(case((status_sql == 'COMPLETED', 1), else_=0)), 0),
+        func.coalesce(func.sum(case((status_sql == 'OVERDUE', 1), else_=0)), 0),
+        func.coalesce(func.sum(case((status_sql == 'IN PROGRESS', 1), else_=0)), 0),
+        func.coalesce(func.sum(case((status_sql == 'TODO', 1), else_=0)), 0),
+    )
+    if user_id is not None:
+        query = query.where(Task.user_id == user_id)
 
-    progress_total = sum(t.progress for t in tasks)
+    (total, progress_total, done, overdue, in_progress, todo) = (
+        db.session.execute(query).one()
+    )
+
+    # Status di luar empat nilai di atas dianggap TODO, sama seperti
+    # perhitungan per-objek yang sebelumnya dipakai.
+    tak_dihitung = total - (done + overdue + in_progress + todo)
+    if tak_dihitung:
+        todo += tak_dihitung
 
     # Catatan bersifat pribadi, jadi jumlahnya ikut dibatasi ke user
     # yang sedang melihat. Mata kuliah boleh dipakai bersama, jadi
@@ -80,23 +112,45 @@ def summary(user_id=None):
 
 
 def by_status(user_id=None):
-    query = Task.query
-    if user_id:
-        query = query.filter_by(user_id=user_id)
+    status_sql = effective_status_sql()
 
-    counts = Counter(t.effective_status() for t in query.all())
-    return [
-        {'status': key, 'count': counts.get(key, 0)}
-        for key in ('TODO', 'IN PROGRESS', 'COMPLETED', 'OVERDUE')
-    ]
+    query = db.select(
+        status_sql.label('status'),
+        func.count(Task.id).label('jumlah'),
+    )
+    if user_id is not None:
+        query = query.where(Task.user_id == user_id)
+
+    # Dikelompokkan di database, bukan dengan Counter di Python.
+    #
+    # GROUP BY memakai ekspresinya sendiri, bukan nama alias 'status'.
+    # PostgreSQL ikut/group by membaca nama 'status' sebagai kolom
+    # tasks.status, bukan hasil CASE, lalu menolak karena deadline tidak
+    # ada di GROUP BY. Mengulang ekspresinya membuat pengelompokan jelas.
+    counts = dict(db.session.execute(query.group_by(status_sql)).all())
+
+    hasil = []
+    for key in ('TODO', 'IN PROGRESS', 'COMPLETED', 'OVERDUE'):
+        hasil.append({'status': key, 'count': counts.get(key, 0)})
+
+    # Status lain yang tidak termasuk empat nilai di atas masuk TODO,
+    # sama seperti perilaku sebelumnya.
+    tak_dihitung = sum(counts.values()) - sum(r['count'] for r in hasil)
+    if tak_dihitung:
+        hasil[0]['count'] += tak_dihitung
+
+    return hasil
 
 
 def by_priority(user_id=None):
-    query = Task.query
-    if user_id:
-        query = query.filter_by(user_id=user_id)
+    query = db.select(Task.priority, func.count(Task.id))
+    if user_id is not None:
+        query = query.where(Task.user_id == user_id)
 
-    counts = Counter(t.priority for t in query.all())
+    # GROUP BY di database, bukan Counter di Python, supaya tidak perlu
+    # memuat seluruh baris ke memori.
+    counts = dict(db.session.execute(query.group_by(Task.priority)).all())
+
     return [
         {'priority': key, 'count': counts.get(key, 0)}
         for key in ('URGENT', 'HIGH', 'MEDIUM', 'LOW')
@@ -104,29 +158,34 @@ def by_priority(user_id=None):
 
 
 def by_course(user_id=None):
-    query = Task.query
-    if user_id:
-        query = query.filter_by(user_id=user_id)
-
-    grouped = {}
-    for task in query.all():
-        name = task.course.name if task.course else 'Tanpa Mata Kuliah'
-        entry = grouped.setdefault(
-            name,
-            {'course': name, 'total': 0, 'completed': 0, 'progress': 0},
-        )
-        entry['total'] += 1
-        entry['progress'] += task.progress
-        if task.status == 'COMPLETED':
-            entry['completed'] += 1
+    query = db.select(
+        Course.name.label('course'),
+        func.count(Task.id).label('total'),
+        func.sum(case((Task.status == 'COMPLETED', 1), else_=0)).label('completed'),
+        func.coalesce(func.sum(Task.progress), 0).label('progress'),
+    ).select_from(Task).outerjoin(Course, Task.course_id == Course.id)
+    if user_id is not None:
+        query = query.where(Task.user_id == user_id)
 
     rows = []
-    for entry in grouped.values():
-        entry['completion_rate'] = _pct(entry['completed'], entry['total'])
-        entry['average_progress'] = round(
-            entry['progress'] / entry['total'], 1
-        ) if entry['total'] else 0
-        rows.append(entry)
+    # Dikelompokkan per courses.name, nama kosong diganti di Python.
+    #
+    # Menulis coalesce(courses.name, 'Tanpa Mata Kuliah') sekaligus di
+    # SELECT dan GROUP BY tidak bisa dipakai: SQLAlchemy mengirim teks
+    # fallback-nya sebagai parameter terpisah, jadi PostgreSQL melihat
+    # dua ekspresi berbeda dan menolak karena courses.name tidak ada
+    # di GROUP BY.
+    for name, total, completed, progress in db.session.execute(
+        query.group_by(Course.name)
+    ):
+        rows.append({
+            'course': name or TANPA_MATA_KULIAH,
+            'total': total,
+            'completed': completed,
+            'progress': progress,
+            'completion_rate': _pct(completed, total),
+            'average_progress': round(progress / total, 1) if total else 0,
+        })
 
     return sorted(rows, key=lambda r: r['total'], reverse=True)
 

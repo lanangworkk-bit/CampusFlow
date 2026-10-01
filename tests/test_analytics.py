@@ -238,6 +238,141 @@ class TestFullReport:
         json.dumps(report)
 
 
+class TestAgregasiDiDatabase:
+    """Agregasi harus selesai di database, bukan dengan memuat semua baris.
+
+    Fungsi-fungsi di sini dulunya memuat seluruh baris ke memori hanya
+    untuk menjumlahkannya, padahal yang dibutuhkan cuma beberapa angka.
+    Tes ini mengunci sifat itu: kalau suatu saat berubah lagi jadi
+    query.all(), waktunya naik banyak tanpa ketahuan.
+    """
+
+    BARIS = 4000
+    BATAS_MS = 400
+
+    @pytest.fixture
+    def banyak_baris(self, app):
+        """Isi tabel dengan ribuan baris milik satu user."""
+        from backend.extensions import db
+        from backend.models import Course, Task, User
+
+        with app.app_context():
+            user = User(
+                username='penguji_skala',
+                email='skala@test.local',
+                password_hash='x' * 60,
+                role='student',
+            )
+            course = Course(name='MK Skala', code='SK1', sks=3)
+            db.session.add_all([user, course])
+            db.session.flush()
+
+            status = ('TODO', 'IN PROGRESS', 'COMPLETED')
+            db.session.add_all([
+                Task(
+                    title=f'Tugas {i}',
+                    status=status[i % 3],
+                    priority='MEDIUM',
+                    progress=i % 100,
+                    deadline=(date(2026, 6, 1) + timedelta(days=i % 30 - 15)).isoformat(),
+                    user_id=user.id,
+                    course_id=course.id,
+                )
+                for i in range(self.BARIS)
+            ])
+            db.session.commit()
+            yield user.id
+
+    @staticmethod
+    def _ukur(fungsi, *args):
+        import time
+
+        mulai = time.perf_counter()
+        hasil = fungsi(*args)
+        return hasil, (time.perf_counter() - mulai) * 1000
+
+    def test_summary_cepat_dan_konsisten(self, app, banyak_baris):
+        with app.app_context():
+            hasil, ms = self._ukur(analytics.summary, banyak_baris)
+
+        assert ms < self.BATAS_MS, f'summary terlalu lambat: {ms:.0f} ms'
+        assert hasil['total'] == self.BARIS
+        # Keempat status saling lepas: jumlahnya selalu sama dengan total.
+        jumlah = (
+            hasil['completed'] + hasil['overdue']
+            + hasil['in_progress'] + hasil['todo']
+        )
+        assert jumlah == hasil['total']
+
+    def test_by_status_cepat_dan_jumlah_benar(self, app, banyak_baris):
+        with app.app_context():
+            hasil, ms = self._ukur(analytics.by_status, banyak_baris)
+
+        assert ms < self.BATAS_MS, f'by_status terlalu lambat: {ms:.0f} ms'
+        assert sum(r['count'] for r in hasil) == self.BARIS
+
+    def test_by_priority_cepat_dan_jumlah_benar(self, app, banyak_baris):
+        with app.app_context():
+            hasil, ms = self._ukur(analytics.by_priority, banyak_baris)
+
+        assert ms < self.BATAS_MS, f'by_priority terlalu lambat: {ms:.0f} ms'
+        assert sum(r['count'] for r in hasil) == self.BARIS
+
+    def test_by_course_cepat_dan_terhitung_benar(self, app, banyak_baris):
+        with app.app_context():
+            hasil, ms = self._ukur(analytics.by_course, banyak_baris)
+
+        assert ms < self.BATAS_MS, f'by_course terlalu lambat: {ms:.0f} ms'
+        assert sum(r['total'] for r in hasil) == self.BARIS
+        # completed memakai status mentah, jadi setiap baris ke-3.
+        assert sum(r['completed'] for r in hasil) == self.BARIS // 3
+
+    def test_tugas_tanpa_mata_kuliah_kelompok_sendiri(self, app, banyak_baris):
+        from backend.extensions import db
+        from backend.models import Task
+
+        with app.app_context():
+            db.session.add(Task(
+                title='Tanpa MK',
+                status='TODO',
+                priority='LOW',
+                progress=0,
+                deadline=None,
+                user_id=banyak_baris,
+            ))
+            db.session.commit()
+
+            hasil = analytics.by_course(banyak_baris)
+
+        tanpa_mk = [r for r in hasil if r['course'] == 'Tanpa Mata Kuliah']
+        assert len(tanpa_mk) == 1
+        assert tanpa_mk[0]['total'] == 1
+
+    def test_tanpa_batas_user_seeing_semua(self, app, banyak_baris):
+        """user_id=None berarti seluruh pengguna, bukan berarti nol baris."""
+        with app.app_context():
+            semua = analytics.summary(None)
+            per_course = analytics.by_course(None)
+
+        assert semua['total'] >= self.BARIS
+        assert semua['total'] == sum(r['total'] for r in per_course)
+
+    def test_tabel_kosong_tidak_menghasilkan_none(self, app):
+        """Tidak ada baris: semua angka harus 0, bukan None."""
+        with app.app_context():
+            hasil = analytics.summary(None)
+            status = analytics.by_status(None)
+            prioritas = analytics.by_priority(None)
+            per_course = analytics.by_course(None)
+
+        assert hasil['total'] == 0
+        assert hasil['completion_rate'] == 0
+        assert hasil['average_progress'] == 0
+        assert sum(r['count'] for r in status) == 0
+        assert sum(r['count'] for r in prioritas) == 0
+        assert per_course == []
+
+
 class TestEndpointAnalytics:
     def test_stats_endpoint(self, auth_client, seeded):
         response = auth_client.get('/api/stats')
