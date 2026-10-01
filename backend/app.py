@@ -115,7 +115,42 @@ def _register_pages(app):
         return jsonify({'status': 'ok'})
 
 
+def _enable_sqlite_foreign_keys(app):
+    """Nyalakan PRIMARY KEY / FOREIGN KEY enforcement di SQLite.
+
+    SQLite membaca PRAGMA ini per koneksi, dan default-nya MATI.
+    Akibatnya SQLite diam-diam mengabaikan seluruh constraint kolom
+    REFERENCES di skema: task dengan user_id yang tidak ada tetap
+    berhasil disimpan. PostgreSQL, yang jadi database production,
+    menolaknya. Dua database yang sama jadi berperilaku berbeda
+    tergantung mana yang dipakai.
+
+    Event ini dipasang sebelum db.init_app() supaya berlaku ke semua
+    koneksi baru dari connection pool, bukan cuma koneksi pertama.
+
+    PRAGMA ini diabaikan diam-diam oleh database selain SQLite, jadi
+    pemanggilannya aman untuk semua dialect.
+    """
+    from sqlalchemy import event
+    from sqlalchemy.engine import Engine
+
+    @event.listens_for(Engine, 'connect')
+    def _set_sqlite_pragma(dbapi_connection, connection_record):
+        # Objek koneksi DBAPI tidak menyebut dialect-nya di repr, jadi
+        # dicek lewat modul driver: modul 'sqlite3' hanya dipakai
+        # koneksi SQLite.
+        if dbapi_connection.__class__.__module__.split('.')[0] != 'sqlite3':
+            return
+
+        cursor = dbapi_connection.cursor()
+        try:
+            cursor.execute('PRAGMA foreign_keys=ON')
+        finally:
+            cursor.close()
+
+
 def _init_extensions(app):
+    _enable_sqlite_foreign_keys(app)
     db.init_app(app)
     migrate.init_app(app, db)
     jwt.init_app(app)

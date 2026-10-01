@@ -15,6 +15,12 @@ BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 INSTANCE_DIR = os.path.join(BASE_DIR, 'instance')
 
 
+def is_sqlite_uri(url):
+    """True kalau url atau objek koneksi menunjuk ke SQLite."""
+    teks = str(url)
+    return teks.startswith('sqlite')
+
+
 def _absolute_sqlite_url(url):
     """Jadikan path SQLite relatif menjadi absolut.
 
