@@ -65,9 +65,9 @@ def server():
     terpisah dengan database sendiri.
     """
     port = _pakai_port()
-    db_path = os.path.join(
-        PROYEK, 'instance', f'browser_{port}.db'
-    )
+    instance_dir = os.path.join(PROYEK, 'instance')
+    os.makedirs(instance_dir, exist_ok=True)
+    db_path = os.path.join(instance_dir, f'browser_{port}.db')
     # FLASK_ENV sengaja 'development', bukan 'testing'.
     #
     # TestingConfig memaksa database in-memory dan mengabaikan
