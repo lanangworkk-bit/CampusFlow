@@ -53,7 +53,16 @@ RUN pip install --no-index --find-links=/wheels -r requirements.txt \
 
 COPY --chown=appuser:appuser . .
 
-RUN mkdir -p /app/database && chown appuser:appuser /app/database
+# Folder yang butuh izin tulis untuk appuser.
+#
+# instance/ dipakai saat DATABASE_URL menunjuk SQLite relatif, dan
+# database/ untuk SQLite default. Alembic juga menulis di instance/.
+RUN mkdir -p /app/database /app/instance \
+ && chown -R appuser:appuser /app/database /app/instance
+
+# Entry point harus executable di dalam image. Melepasnya dari Git
+# membuat file kehilangan bit+x saat di-checkout di host.
+RUN chmod +x /app/docker-entrypoint.sh
 
 USER appuser
 
@@ -62,9 +71,16 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
     CMD curl -fsS http://localhost:8000/api/health || exit 1
 
-# Gunicorn dengan 3 worker. Jumlah worker choked jumlah CPU.
+# Gunicorn dengan 3 worker, sesuai jumlah CPU.
 # --preload memuat aplikasi sekali sebelum worker mulai,
 # supaya RAM tidak dipakai berulang kali.
+#
+# Container dijalankan lewat entrypoint, bukan langsung ke gunicorn.
+# Entrypoint menjalankan `flask db upgrade` lebih dulu; tanpa itu
+# skema tidak pernah dibuat karena mode production tidak auto-create,
+# dan /api/health akan membalas 503.
+ENTRYPOINT ["/app/docker-entrypoint.sh"]
+
 CMD ["gunicorn", \
      "--bind", "0.0.0.0:8000", \
      "--workers", "3", \
