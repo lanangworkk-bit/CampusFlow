@@ -3,8 +3,10 @@
 Pengelola tugas kuliah pribadi. Satu tempat untuk mencatat tugas,
 memantau tenggat, dan melihat apakah bebannya masih masuk akal.
 
-Berjalan dengan Flask, SQLite, dan JavaScript polos tanpa framework
-di sisi klien. Tidak ada build step, tidak ada `npm install`.
+Backend Flask dengan SQLAlchemy dan Alembic, satu basis kode untuk dua
+database: SQLite untuk development (tanpa konfigurasi sama sekali) dan
+PostgreSQL untuk production. JavaScript polos di sisi klien, tanpa
+framework dan tanpa build step.
 
 ## Fitur
 
@@ -41,8 +43,20 @@ di sisi klien. Tidak ada build step, tidak ada `npm install`.
 **Operasional**
 - Health check, versi aplikasi, dan metrik
 - Audit log untuk perubahan data
-- Rate limit pada endpoint sensitif
-- Container Docker dan konfigurasi CI
+- Rate limit pada endpoint sensitif, dengan Redis saat dikonfigurasi
+- Container Docker, Docker Compose, dan CI dengan enam job
+
+## Tumpukan teknologi
+
+| Lapisan      | Teknologi                                          |
+| ------------ | -------------------------------------------------- |
+| Backend      | Flask 3, SQLAlchemy 2, Alembic, Flask-JWT-Extended |
+| Database     | SQLite (default) atau PostgreSQL 16                |
+| Rate limit   | memory (default) atau Redis                        |
+| Server       | Gunicorn, 3 worker                                  |
+| Klien        | JavaScript polos, tanpa framework                   |
+| Pengujian    | pytest dan Playwright (Chromium)                    |
+| Operasional  | Docker, Docker Compose, GitHub Actions              |
 
 ## Menjalankan
 
