@@ -116,7 +116,7 @@ def run_seed(admin=False, reset=True, user=None):
             progress=100 if status == 'COMPLETED' else (
                 random.choice([25, 50, 75]) if status == 'IN PROGRESS' else 0
             ),
-            deadline=(today + timedelta(days=due_in)).isoformat(),
+            deadline=today + timedelta(days=due_in),
             course_id=(
                 random.choice(courses).id if index % 4 != 3 else None
             ),

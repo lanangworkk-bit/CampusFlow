@@ -34,7 +34,12 @@ DEFAULT_PER_PAGE = 20
 # input user diabaikan dan diganti default. Ini yang mencegah
 # SQL injection lewat parameter sort.
 TASK_SORTS = {
-    'deadline': lambda: func.coalesce(Task.deadline, '9999-12-31'),
+    # Task tanpa tenggat harus turun paling akhir, jadi kolomnya
+    # diganti date.max. Dulu ini ditulis sebagai teks '9999-12-31':
+    # itu bekerja selama deadline masih string, tapi sekarang
+    # deadline bertipe DATE dan PostgreSQL menolak mencampur DATE dengan
+    # teks literal saat menyusun query.
+    'deadline': lambda: func.coalesce(Task.deadline, date.max),
     'title': lambda: Task.title,
     'priority': lambda: Task.priority,
     'status': lambda: Task.status,
@@ -153,7 +158,7 @@ def list_tasks():
         query = query.filter(
             Task.status != 'COMPLETED',
             Task.deadline.isnot(None),
-            Task.deadline < date.today().isoformat(),
+            Task.deadline < date.today(),
         )
     elif status in TASK_STATUSES:
         # Penting: filter harus memakai STATUS YANG SAMA dengan yang
@@ -169,7 +174,7 @@ def list_tasks():
             query = query.filter(
                 or_(
                     Task.deadline.is_(None),
-                    Task.deadline >= date.today().isoformat(),
+                    Task.deadline >= date.today(),
                 )
             )
 
@@ -356,12 +361,17 @@ def delete_task(task_id):
 
 
 def _valid_deadline(value):
-    """Coba ubah input jadi YYYY-MM-DD."""
+    """Ubah input jadi date, atau None kalau kosong.
+
+    Yang dikembalikan sudah date, bukan string: kolomnya bertipe DATE
+    dan validasi di sini jadi satu-satunya tempat yang perlu tahu
+    format apa pun. Format keluaran ke klien ditangani Task.to_dict().
+    """
     if value is None or str(value).strip() == '':
         return None, None
     text = str(value).strip()
     try:
-        return date.fromisoformat(text).isoformat(), None
+        return date.fromisoformat(text), None
     except ValueError:
         return None, 'Format tanggal harus YYYY-MM-DD'
 

@@ -31,6 +31,26 @@ def today():
     return date.today().isoformat()
 
 
+def parse_deadline(value):
+    """Terjemahkan input deadline apa pun jadi date, atau None.
+
+    Tiga sumber nilai muncul di aplikasi ini: string dari JSON
+    (YYYY-MM-DD), date dari database, dan None. Fungsi ini membuat
+    semua berakhir di satu tipe, jadi tidak ada tempat lain yang
+    perlueka menebak-nebak format.
+    """
+    if value is None or value == '':
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    try:
+        return date.fromisoformat(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+
+
 class User(db.Model):
     __tablename__ = 'users'
 
@@ -136,7 +156,17 @@ class Task(db.Model):
         db.String(20), nullable=False, default='MEDIUM', index=True
     )
     progress = db.Column(db.Integer, nullable=False, default=0)
-    deadline = db.Column(db.String(10), index=True)
+    # Tipe DATE, bukan String(10).
+    #
+    # Sebagai string, perbandingan '2026-10-1' < '2026-10-01' memakai
+    # urutan karakter, bukan urutan tanggal: '1' (0x31) lebih besar dari
+    # '0' (0x30), jadi tanggal dengan satu digit terpotong terlihat
+    # LEBIH LAMBAT daripada yang padanya, dan sort tenggat ikut salah.
+    # Tidak ada error, hanya angka yang diam-diam keliru.
+    #
+    # Kolom DATE menyimpan perbandingan sebagai tanggal sungguhan,
+    # jadi index-nya benar dan kedua database tidak perlu kasus khusus.
+    deadline = db.Column(db.Date, index=True)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), index=True)
     course_id = db.Column(db.Integer, db.ForeignKey('courses.id'), index=True)
     created_at = db.Column(db.DateTime, default=utcnow, nullable=False)
@@ -154,7 +184,7 @@ class Task(db.Model):
         """
         if self.status == 'COMPLETED':
             return 'COMPLETED'
-        if self.deadline and self.deadline < today():
+        if self.deadline and self.deadline < date.today():
             return 'OVERDUE'
         return self.status
 
@@ -167,7 +197,11 @@ class Task(db.Model):
             'raw_status': self.status,
             'priority': self.priority,
             'progress': self.progress,
-            'deadline': self.deadline,
+            # Date dikirim sebagai string YYYY-MM-DD supaya format JSON
+            # sama dengan yang dikirim ke server. Klien tidak pernah
+            # melihat objek date Python, jadi tidak ada perubahan pada
+            # sisi JavaScript.
+            'deadline': self.deadline.isoformat() if self.deadline else None,
             'course_id': self.course_id,
             'course_name': self.course.name if self.course else None,
             'course_code': self.course.code if self.course else None,

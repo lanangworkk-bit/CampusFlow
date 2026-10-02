@@ -47,7 +47,7 @@ class TestSummary:
         from backend.models import Task
         db.session.add(Task(
             title='Telat', user_id=user.id,
-            status='IN PROGRESS', deadline='2020-01-01',
+            status='IN PROGRESS', deadline=date(2020, 1, 1),
         ))
         db.session.commit()
 
@@ -100,7 +100,7 @@ class TestForecast:
 
     def test_beban_berat(self, db, user, course):
         from backend.models import Task
-        soon = (date.today() + timedelta(days=2)).isoformat()
+        soon = date.today() + timedelta(days=2)
         for i in range(40):
             db.session.add(Task(
                 title=f'Beban {i}', user_id=user.id, course_id=course.id,
@@ -113,7 +113,7 @@ class TestForecast:
 
     def test_horizon_berubah(self, db, user, course):
         from backend.models import Task
-        far = (date.today() + timedelta(days=20)).isoformat()
+        far = date.today() + timedelta(days=20)
         db.session.add(Task(title='Jauh', user_id=user.id, deadline=far))
         db.session.commit()
         assert analytics.forecast(user.id, 7)['tasks_due'] == 0
@@ -130,12 +130,12 @@ class TestUrgencyScore:
         lama = Task(
             title='Telat', user_id=user.id, status='TODO',
             priority='URGENT',
-            deadline=(date.today() - timedelta(days=5)).isoformat(),
+            deadline=(date.today() - timedelta(days=5)),
         )
         baru = Task(
             title='Aman', user_id=user.id, status='TODO',
             priority='URGENT',
-            deadline=(date.today() + timedelta(days=30)).isoformat(),
+            deadline=(date.today() + timedelta(days=30)),
         )
         db.session.add_all([lama, baru])
         db.session.commit()
@@ -161,7 +161,7 @@ class TestUrgencyScore:
 class TestSuggestions:
     def test_mengembalikan_dengan_alasan(self, db, user):
         from backend.models import Task
-        soon = (date.today() + timedelta(days=1)).isoformat()
+        soon = date.today() + timedelta(days=1)
         db.session.add(Task(
             title='Mendesak', user_id=user.id, status='TODO',
             priority='URGENT', deadline=soon,
@@ -177,9 +177,9 @@ class TestSuggestions:
         from backend.models import Task
         db.session.add_all([
             Task(title='A', user_id=user.id, status='TODO', priority='LOW',
-                 deadline=(date.today() + timedelta(days=60)).isoformat()),
+                 deadline=(date.today() + timedelta(days=60))),
             Task(title='B', user_id=user.id, status='TODO', priority='URGENT',
-                 deadline=(date.today() - timedelta(days=10)).isoformat()),
+                 deadline=(date.today() - timedelta(days=10))),
         ])
         db.session.commit()
         scores = [r['urgency_score'] for r in analytics.suggest(user.id)]
@@ -274,7 +274,7 @@ class TestAgregasiDiDatabase:
                     status=status[i % 3],
                     priority='MEDIUM',
                     progress=i % 100,
-                    deadline=(date(2026, 6, 1) + timedelta(days=i % 30 - 15)).isoformat(),
+                    deadline=(date(2026, 6, 1) + timedelta(days=i % 30 - 15)),
                     user_id=user.id,
                     course_id=course.id,
                 )

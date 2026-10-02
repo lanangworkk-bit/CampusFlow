@@ -91,7 +91,11 @@ class TestUpdateTask:
         body = response.get_json()
         assert body['title'] == 'Hanya Judul'
         assert body['priority'] == original.priority
-        assert body['deadline'] == original.deadline
+        # Response API selalu string YYYY-MM-DD, sementara original.deadline
+        # sekarang date object karena kolomnya bertipe DATE. Bandingkan
+        # dalam format yang sama supaya yang diuji adalah nilai
+        # tenggatnya, bukan perbedaan tipe.
+        assert body['deadline'] == original.deadline.isoformat()
 
     def test_completed_maksa_progress_100(self, auth_client, seeded):
         response = auth_client.put(f'/api/tasks/{seeded[0].id}', json={

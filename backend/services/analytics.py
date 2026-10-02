@@ -16,7 +16,7 @@ from datetime import date, datetime, timedelta
 from sqlalchemy import and_, case, func
 
 from backend.extensions import db
-from backend.models import Course, Note, Task, today, utcnow
+from backend.models import Course, Note, Task, parse_deadline, utcnow
 
 
 # ---------------------------------------------------------------- statistik
@@ -44,7 +44,7 @@ def effective_status_sql():
             and_(
                 Task.status != 'COMPLETED',
                 Task.deadline.isnot(None),
-                Task.deadline < today(),
+                Task.deadline < date.today(),
             ),
             'OVERDUE',
         ),
@@ -262,7 +262,9 @@ def upcoming(user_id=None, days=14):
     if user_id:
         query = query.filter_by(user_id=user_id)
 
-    limit_date = (date.today() + timedelta(days=days)).isoformat()
+    # Bandingkan dengan date, bukan teks: kolomnya DATE, jadi
+    # perbandingannya harus ikut bertipe date.
+    limit_date = date.today() + timedelta(days=days)
     rows = query.filter(Task.deadline <= limit_date).all()
     return [
         dict(t.to_dict(), days_left=_days_left(t.deadline)) for t in rows
@@ -270,11 +272,14 @@ def upcoming(user_id=None, days=14):
 
 
 def _days_left(deadline):
-    if not deadline:
-        return None
-    try:
-        target = date.fromisoformat(deadline)
-    except ValueError:
+    """Sisa hari sampai tenggat. Negatif berarti sudah lewat.
+
+    Menerima date maupun string YYYY-MM-DD lewat parse_deadline,
+    supaya pemanggil yang kebetulan memegang string tidak ikut
+    gagal diam-diam.
+    """
+    target = parse_deadline(deadline)
+    if target is None:
         return None
     return (target - date.today()).days
 
@@ -374,7 +379,10 @@ def suggest(user_id=None, limit=5):
     for task in query.all():
         scored.append((urgency_score(task), task))
 
-    scored.sort(key=lambda pair: (-pair[0], pair[1].deadline or '9999'))
+    # Deadline None diletakkan paling akhir dengan date.max, bukan
+    # teks '9999': sekarang kolomnya bertipe DATE, jadi sentinel
+    # harus satu tipe agar urutannya benar.
+    scored.sort(key=lambda pair: (-pair[0], pair[1].deadline or date.max))
 
     results = []
     for score, task in scored[:limit]:
