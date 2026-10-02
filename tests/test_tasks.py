@@ -169,13 +169,19 @@ class TestFilterSortPaginate:
         assert all(t['status'] == 'TODO' for t in response.get_json()['items'])
 
     def test_filter_overdue_menghitung_berulang(self, auth_client, seeded):
-        from datetime import date
-        import pytest as _pt
         response = auth_client.get('/api/tasks?status=OVERDUE')
         items = response.get_json()['items']
-        # Beta (20 Sep) dan Gamma (1 Jan) overdue kalau hari ini >= 20 Sep.
-        expected = 2 if date.today().isoformat() >= '2026-09-20' else 1
-        assert len(items) == expected
+        # Beta dan Gamma punya tenggat relatif 10 dan 200 hari lalu, jadi
+        # keduanya pasti OVERDUE. Delta selesai dan Alpha masih 30 hari
+        # ke depan, jadi tidak ikut terhitung.
+        #
+        # Sebelumnya test ini memakai pengaman
+        # `2 if date.today() >= '2026-09-20' else 1`, yang membuat
+        # test bisa lolos tanpa benar-benar memeriksa apa pun saat
+        # tanggalnya belum tercapai. Sekarang tenggatnya relatif, jadi
+        # jumlahannya pasti 2 kapan pun test dijalankan.
+        assert len(items) == 2
+        assert {i['title'] for i in items} == {'Tugas Beta', 'Tugas Gamma'}
         assert all(i['status'] == 'OVERDUE' for i in items)
 
     def test_task_tidak_muncul_di_dua_filter(self, auth_client, seeded):

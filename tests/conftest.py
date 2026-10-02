@@ -7,6 +7,7 @@ jadi test tidak saling mengganggu.
 
 import os
 import sys
+from datetime import date, timedelta
 
 import pytest
 
@@ -146,20 +147,39 @@ def auth_header(client):
 
 @pytest.fixture
 def seeded(db, user, course):
-    """User dengan beberapa task untuk menguji filter, sort, dan analitik."""
+    """User dengan beberapa task untuk menguji filter, sort, dan analitik.
+
+    Tenggat dihitung relatif terhadap hari ini, bukan tanggal yang
+    ditulis mati. Kalau用的是 tanggal keras, test ini akan basi
+    sendiri begitu tanggal aslinya terlewati: tugas yang أمس masih
+    'belum overdue' tiba-tiba jadi OVERDUE dan jumlahannya berubah
+    tanpa ada yang mengubah kode.
+    """
+    hari_ini = date.today()
+
+    def dalam(hari):
+        """Tenggat relatif: -30 berarti 30 hari lalu, +60 berarti 60 hari ke depan."""
+        return hari_ini + timedelta(days=hari)
+
     tasks = [
+        # Masih di depan, jadi belum OVERDUE.
         Task(title='Tugas Alpha', description='Belajar SQL', status='TODO',
-             priority='HIGH', deadline='2026-10-01', user_id=user.id,
+             priority='HIGH', deadline=dalam(30), user_id=user.id,
              course_id=course.id, progress=0),
+        # 10 hari lalu, jadi sudah lewat.
         Task(title='Tugas Beta', description='Belajar Flask', status='IN PROGRESS',
-             priority='MEDIUM', deadline='2026-09-20', user_id=user.id,
+             priority='MEDIUM', deadline=dalam(-10), user_id=user.id,
              progress=50),
+        # Jauh-jauh lalu, juga lewat.
         Task(title='Tugas Gamma', description='Tugas lama', status='TODO',
-             priority='URGENT', deadline='2026-01-01', user_id=user.id,
+             priority='URGENT', deadline=dalam(-200), user_id=user.id,
              progress=0),
+        # Sudah selesai, jadi status COMPLETED mengalah apa pun
+        #-deadline-nya.
         Task(title='Tugas Delta', description='Sudah beres', status='COMPLETED',
-             priority='LOW', deadline='2026-09-01', user_id=user.id,
+             priority='LOW', deadline=dalam(-40), user_id=user.id,
              progress=100),
+        # Tanpa tenggat sama sekali: tidak pernah OVERDUE.
         Task(title='Tugas Epsilon', status='TODO', priority='LOW',
              deadline=None, user_id=user.id),
     ]
