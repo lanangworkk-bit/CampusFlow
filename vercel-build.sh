@@ -1,24 +1,24 @@
 #!/bin/sh
 # Build step untuk deployment di Vercel.
 #
-# Dua hal yang harus terjadi sebelum aplikasi melayani request:
+# Skema database diperbarui sebelum aplikasi melayani request. Mode
+# production sengaja tidak memakai create_all(), jadi tanpa langkah ini
+# tabelnya tidak ada dan /api/health membalas 503.
 #
-# 1. Aset statis (style.css, script.js, css/) disalin ke public/.
-#    Vercel menyajikan folder public/ langsung dari CDN dan tidak
-#    membaca app.static_folder milik Flask. Folder static/ yang asli
-#    tetap dipertahankan karena dipakai saat jalan lokal dan di Docker.
-#
-# 2. Skema database diperbarui. Mode production sengaja tidak memakai
-#    create_all(), jadi tanpa langkah ini tabelnya tidak ada dan
-#    /api/health membalas 503.
+# Migrasi dijalankan lewat DATABASE_URL_UNPOOLED kalau variabel itu ada.
+# Endpoint '-pooler' dari Neon memakai PgBouncer dalam mode transaction,
+# dan menjalankan DDL lewat sana berisiko. Kalau variabelnya tidak ada
+# (mis. database penyedia lain), DATABASE_URL biasa dipakai.
 
 set -e
 
-echo "[vercel] Menyalin aset statis ke public/ ..."
-mkdir -p public
-cp -R static public/static
-
-echo "[vercel] Menjalankan migrasi database ..."
-python -m flask --app backend.app db upgrade
+if [ -n "$DATABASE_URL_UNPOOLED" ]; then
+    echo "[vercel] Menjalankan migrasi lewat koneksi langsung (unpooled) ..."
+    DATABASE_URL="$DATABASE_URL_UNPOOLED" \
+        python -m flask --app backend.app db upgrade
+else
+    echo "[vercel] Menjalankan migrasi database ..."
+    python -m flask --app backend.app db upgrade
+fi
 
 echo "[vercel] Build selesai."

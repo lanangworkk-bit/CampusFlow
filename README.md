@@ -8,6 +8,8 @@ database: SQLite untuk development (tanpa konfigurasi sama sekali) dan
 PostgreSQL untuk production. JavaScript polos di sisi klien, tanpa
 framework dan tanpa build step.
 
+Demo langsung: <https://campusflow-lnzw.vercel.app>
+
 ## Fitur
 
 **Tugas**
@@ -188,6 +190,9 @@ migrations/           riwayat skema (Alembic)
 templates/            halaman HTML
 static/               CSS dan JavaScript
 tests/                test pytest
+wsgi.py               titik masuk WSGI untuk Vercel
+vercel.json           perintah build Vercel
+vercel-build.sh       migrasi database sebelum request dilayani
 ```
 
 ## Test
@@ -241,6 +246,28 @@ docker compose up -d --build
 Compose menjalankan tiga service: aplikasi di Gunicorn, PostgreSQL,
 dan Redis untuk rate limit. Data PostgreSQL disimpan di volume
 `pgdata` dan tidak hilang saat container dihapus.
+
+### Vercel dan Neon
+
+Versi di <https://campusflow-lnzw.vercel.app> dijalankan Vercel, dengan
+Neon sebagai PostgreSQL. Tiga file di akar repo yang menyiapkannya:
+
+| File | Peran |
+| --- | --- |
+| `wsgi.py` | titik masuk WSGI yang dipanggil Vercel |
+| `vercel.json` | perintah build dan batas waktu fungsi |
+| `vercel-build.sh` | menjalankan migrasi sebelum request dilayani |
+
+`vercel-build.sh` memakai `DATABASE_URL_UNPOOLED` kalau variabel itu ada.
+Endpoint `-pooler` dari Neon memakai PgBouncer dalam mode transaction,
+dan menjalankan DDL lewat sana berisiko. Saat melayani request aplikasi
+tetap memakai `DATABASE_URL` yang pooled, dengan `NullPool` karena tiap
+invocation bisa jalan di instance yang berbeda.
+
+Variabel yang perlu diset di production: `FLASK_ENV=production`,
+`SECRET_KEY`, `JWT_SECRET_KEY`, dan `DATABASE_URL` yang diisi otomatis
+oleh integrasi Neon. Tanpa `SECRET_KEY` yang bukan nilai bawaan, mode
+production menolak start.
 
 ## Catatan
 

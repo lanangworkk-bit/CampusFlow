@@ -45,3 +45,7 @@ migrations/*/__pycache__/
 # Vercel: tautan proyek dan hasil build, dibuat ulang tiap deploy
 .vercel/
 public/
+
+# Dipasang otomatis oleh integrasi Neon, bukan bagian aplikasi
+.agents/
+skills-lock.json
