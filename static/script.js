@@ -11,12 +11,14 @@
 
 const API = '';
 const TOKEN_KEY = 'campusflow.token';
+const REFRESH_KEY = 'campusflow.refresh';
 const USER_KEY = 'campusflow.user';
 const THEME_KEY = 'campusflow.theme';
 
 // --------------------------------------------------------------- state
 const state = {
     token: localStorage.getItem(TOKEN_KEY),
+    refreshToken: localStorage.getItem(REFRESH_KEY),
     user: JSON.parse(localStorage.getItem(USER_KEY) || 'null'),
     tasks: [],
     courses: [],
@@ -102,7 +104,61 @@ function toast(message, type = 'info') {
 }
 
 // --------------------------------------------------------- networking
-async function api(path, options = {}) {
+// Access token berumur pendek, jadi sering kedaluwarsa saat aplikasi
+// masih terbuka. Waktu itu server membalas 401, tapi sesi belum
+// benar-benar habis: masih ada refresh token. Fungsi ini menukarnya
+// diam-diam lalu mengulang request aslinya, jadi user tidak
+// merasakan apa-apa selain jeda sesaat.
+let refreshing = null;
+
+async function refreshSession() {
+    // Kalau beberapa request gagal 401 pada saat yang sama,
+    // hanya satu yang menjalankan refresh. Yang lain menunggu hasil
+    // yang sama lewat variabel `refreshing`.
+    if (refreshing) return refreshing;
+
+    if (!state.refreshToken) return null;
+
+    refreshing = (async () => {
+        try {
+            // Refresh token dikirim sebagai Bearer, bukan di body. Bearer di
+            // sini berisi refresh token, bukan access token: endpoint ini
+            // memang memeriksa jenis token yang dikirim.
+            const response = await fetch(API + '/api/auth/refresh', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${state.refreshToken}`,
+                },
+            });
+            if (!response.ok) {
+                // Refresh token juga tidak berlaku: sesi benar-benar habis.
+                return null;
+            }
+            const data = await response.json();
+            state.token = data.token;
+            // Refresh token juga dirotasi server, jadi yang lama
+            // tidak boleh disimpan lagi.
+            state.refreshToken = data.refresh_token;
+            localStorage.setItem(TOKEN_KEY, data.token);
+            localStorage.setItem(REFRESH_KEY, data.refresh_token);
+            localStorage.setItem(USER_KEY, JSON.stringify(data.user));
+            // Panel login masih yang tampil: renderAuth() dipanggil
+            // sebelum token basi dikembalikan 401, jadi tampilan harus
+            // diselaraskan lagi di sini.
+            renderAuth();
+            return data.token;
+        } catch (err) {
+            return null;
+        } finally {
+            refreshing = null;
+        }
+    })();
+
+    return refreshing;
+}
+
+async function api(path, options = {}, sudahCobaRefresh = false) {
     const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
     if (state.token) headers.Authorization = `Bearer ${state.token}`;
 
@@ -114,10 +170,26 @@ async function api(path, options = {}) {
     }
 
     if (response.status === 401) {
-        if (path.startsWith('/api/auth/')) {
+        // Login dan register: 401 berarti kredensial salah. Di sini
+        // tidak ada sesi yang bisa diselamatkan, jadi langsung
+        // laporkan ke user.
+        if (path === '/api/auth/login' || path === '/api/auth/register') {
             const body = await response.json().catch(() => ({}));
             throw new Error(body.error || 'Email atau password salah');
         }
+
+        // Endpoint auth lain (/me, /refresh, /logout) memakai token yang
+        // sama dengan request biasa, jadi 401 di sana berarti tokennya
+        // basi dan masih bisa diselamatkan lewat refresh.
+
+        // Coba tukar refresh token sekali saja. Parameter ketiga
+        // mencegah rekursi: kalau token barunya juga ditolak, jangan
+        // coba refresh lagi.
+        if (!sudahCobaRefresh) {
+            const baru = await refreshSession();
+            if (baru) return api(path, options, true);
+        }
+
         logout(true);
         throw new Error('Sesi habis. Silakan login lagi.');
     }
@@ -151,24 +223,54 @@ async function login(username, password) {
         method: 'POST',
         body: JSON.stringify({ username, password }),
     });
-    state.token = data.token;
-    state.user = data.user;
-    localStorage.setItem(TOKEN_KEY, data.token);
-    localStorage.setItem(USER_KEY, JSON.stringify(data.user));
+    saveSession(data);
     return data;
 }
 
 async function register(payload) {
-    return api('/api/auth/register', {
+    const data = await api('/api/auth/register', {
         method: 'POST',
         body: JSON.stringify(payload),
     });
+    saveSession(data);
+    return data;
+}
+
+function saveSession(data) {
+    state.token = data.token;
+    state.refreshToken = data.refresh_token;
+    state.user = data.user;
+    localStorage.setItem(TOKEN_KEY, data.token);
+    localStorage.setItem(REFRESH_KEY, data.refresh_token);
+    localStorage.setItem(USER_KEY, JSON.stringify(data.user));
 }
 
 function logout(silent = false) {
+    const refreshToken = state.refreshToken;
+
+    // Beritahu server dulu supaya refresh token dicabut. Kalau tidak,
+    // sesi ini masih bisa diperpanjang diam-diam padahal user sudah
+    // menekan logout. Kegagalan di sini sengaja diabaikan: kalau
+    // server sudah tidak terjangkau, tidak ada yang bisa dicabut, dan
+    // tetap lebih baik keluar dari UI daripada diam-diam gagal.
+    if (refreshToken) {
+        const headers = { 'Content-Type': 'application/json' };
+        // Access token ikut dikirim. Server perlu tahu sesi milik siapa
+        // yang dicabut, dan memverifikasi kepemilikan refresh token
+        // dilakukan dengan access token yang sah.
+        if (state.token) headers.Authorization = `Bearer ${state.token}`;
+        fetch(API + '/api/auth/logout', {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ refresh_token: refreshToken }),
+        }).catch(() => {});
+    }
+
     state.token = null;
+    state.refreshToken = null;
     state.user = null;
     localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(REFRESH_KEY);
     localStorage.removeItem(USER_KEY);
     showAuth();
     if (!silent) toast('Kamu sudah keluar', 'info');

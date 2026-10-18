@@ -258,6 +258,81 @@ class TestLogin:
         assert halaman.is_visible('#currentUser')
 
 
+class TestRefreshToken:
+    """Access token sengaja dibuat berumur pendek.
+
+    Test di sini tidak menunggu 30 menit. Tokennya dipalsukan lebih
+    dulu supaya terasa kedaluwarsa, lalu request otomatis exchanging.
+    """
+
+    def test_refresh_token_tersimpan(self, halaman):
+        login(halaman)
+        refresh = halaman.evaluate(
+            'localStorage.getItem("campusflow.refresh")'
+        )
+        assert refresh, 'refresh token tidak disimpan'
+        assert len(refresh) > 20
+
+    def test_access_token_kedaluwarsa_lama_tetap_terhubung(self, halaman):
+        """Token access basi ditukar diam-diam, user tidak dikeluarkan."""
+        login(halaman)
+        access_lama = halaman.evaluate(
+            'localStorage.getItem("campusflow.token")'
+        )
+
+        # Token yang tidak bisa didekode ditolak server, sama dengan
+        # efek kedaluwarsa dari sisi frontend: 401 yang memicu
+        # penukaran token.
+        # Tokennya diubah di localStorage, jadi halaman dimuat ulang
+        # supaya init() membacanya. Uneknya: begitu halaman dimuat,
+        # aplikasi memanggil API, dapat 401, lalu menukar token.
+        halaman.evaluate("""
+            localStorage.setItem('campusflow.token', 'token.lama.kedaluwarsa');
+        """)
+        halaman.reload(wait_until='networkidle')
+        halaman.wait_for_function(
+            "() => localStorage.getItem('campusflow.token') !== %r"
+            % access_lama,
+            timeout=10000,
+        )
+
+        # Halaman harus tetap di dalam aplikasi, bukan balik ke login.
+        assert halaman.is_visible('#app:not(.hidden)')
+        assert not halaman.is_visible('#auth')
+        assert halaman.bersih_error() == []
+
+    def test_token_baru_berbeda_dari_yang_lama(self, halaman):
+        login(halaman)
+        sebelum = halaman.evaluate(
+            'localStorage.getItem("campusflow.refresh")'
+        )
+        halaman.evaluate("""
+            localStorage.setItem('campusflow.token', 'token.lama.kedaluwarsa');
+        """)
+        halaman.reload(wait_until='networkidle')
+        halaman.wait_for_function(
+            "() => localStorage.getItem('campusflow.refresh') !== %r" % sebelum,
+            timeout=10000,
+        )
+        sesudah = halaman.evaluate(
+            'localStorage.getItem("campusflow.refresh")'
+        )
+        # Refresh token juga dirotasi server, jadi yang lama tidak
+        # boleh masih dipakai.
+        assert sesudah != sebelum
+
+    def test_tanpa_refresh_token_user_dikeluarkan(self, halaman):
+        """Kalau tidak ada refresh token, sesi memang habis."""
+        login(halaman)
+        halaman.evaluate("""
+            localStorage.removeItem('campusflow.refresh');
+            localStorage.setItem('campusflow.token', 'token.lama.kedaluwarsa');
+        """)
+        halaman.reload(wait_until='networkidle')
+        halaman.wait_for_selector('#auth:not(.hidden)', timeout=10000)
+        assert halaman.is_visible('#auth')
+
+
 class TestRegistrasi:
     def test_registrasi_membuat_akun_baru(self, halaman):
         halaman.click('[data-auth-tab="register"]')

@@ -37,6 +37,11 @@ framework dan tanpa build step.
 
 **Akun**
 - Registrasi dan login dengan JWT
+- Access token berumur pendek dan refresh token berumur panjang, ditukar
+  otomatis di frontend saat access token basi
+- Rotasi refresh token: setiap token hanya bisa dipakai sekali, dan
+  pemakaian ulang dianggap penyalahgunaan sehingga seluruh sesi dicabut
+- Logout mencabut sesi di server, plus daftar sesi aktif per pengguna
 - Dua peran: student dan admin
 - Setiap pengguna hanya melihat dan mengubah datanya sendiri
 
@@ -107,6 +112,8 @@ Salin `.env.example` jadi `.env` untuk mengubah nilai:
 | --- | --- | --- |
 | `SECRET_KEY` | kunci dev | Wajib diganti di produksi |
 | `JWT_SECRET_KEY` | sama dengan `SECRET_KEY` | Kunci penandatangan token |
+| `JWT_EXPIRES_MINUTES` | `30` | Umur access token |
+| `JWT_REFRESH_EXPIRES_DAYS` | `14` | Umur refresh token |
 | `DATABASE_URL` | SQLite lokal | Contoh: `postgresql://user:pass@localhost/campusflow` |
 | `ADMIN_API_KEY` | kosong | Kunci untuk endpoint `/api/metrics` |
 | `RATELIMIT_STORAGE_URI` | `memory://` | Pakai `redis://` di produksi |
@@ -140,6 +147,31 @@ tercatat.
 Tabel dan index dideklarasikan di model. Jangan menambahkan index lewat
 `CREATE INDEX` terpisah di file lain, karena Alembic tidak akan melihat
 dan akan mencoba menghapusnya di migration berikutnya.
+
+### Database lama yang belum pernah di-stamp
+
+Mode `development` memakai `create_all()`, jadi database yang dibuat
+sebelum migrasi pertama ada tidak punya tabel `alembic_version`. Akibatnya
+`db upgrade` mencoba membuat ulang tabel yang sudah ada dan berhenti di
+`table courses already exists`.
+
+Solusinya bukan mengulang `upgrade` dari awal, tapi menyatakan bahwa
+skema awal sudah ada, lalu menjalankan sisa migrasinya:
+
+```bash
+# 1. Backup dulu. Migrasi di bawah mengubah skema, bukan hanya menambah.
+cp database/campusflow.db database/campusflow.db.bak
+
+# 2. Tandai skema awal sudah ada.
+flask --app backend.app db stamp ddd7e9fce307
+
+# 3. Jalankan migrasi yang tertinggal.
+flask --app backend.app db upgrade
+```
+
+Revision `ddd7e9fce307` adalah migration skema awal. Kalau database Anda
+sudah pernah migration lain yang berjalan, stamp ke revision terakhir
+yang tercatat di `alembic_version`, bukan ke yang di atas.
 
 ## Struktur
 

@@ -16,6 +16,9 @@ from functools import wraps
 from flask import Blueprint, current_app, jsonify, request
 from flask_jwt_extended import (
     create_access_token,
+    create_refresh_token,
+    decode_token,
+    get_jwt,
     get_jwt_identity,
     jwt_required,
 )
@@ -23,7 +26,7 @@ from sqlalchemy import func, or_
 
 from backend.extensions import db, limiter
 from backend.services.security import body, log
-from backend.models import User, utcnow
+from backend.models import RefreshToken, User, utcnow
 
 auth_bp = Blueprint('auth', __name__, url_prefix='/api/auth')
 
@@ -81,10 +84,10 @@ def register():
     db.session.add(user)
     db.session.commit()
 
-    token = create_access_token(
-        identity=str(user.id), additional_claims={'role': user.role}
-    )
-    return jsonify({'token': token, 'user': user.to_dict()}), 201
+    access, refresh = _issue_tokens(user)
+    return jsonify(
+        {'token': access, 'refresh_token': refresh, 'user': user.to_dict()}
+    ), 201
 
 
 @auth_bp.route('/login', methods=['POST'])
@@ -112,10 +115,121 @@ def login():
     user.last_login_at = utcnow()
     db.session.commit()
 
-    token = create_access_token(
+    access, refresh = _issue_tokens(user)
+    return jsonify(
+        {'token': access, 'refresh_token': refresh, 'user': user.to_dict()}
+    ), 200
+
+
+def _issue_tokens(user):
+    """Buat sepasang access + refresh token, dan catat sesinya.
+
+    Access token sengaja berumur pendek. Kalau bocor, yang hilang cuma
+    beberapa menit akses. Refresh token yang berumur panjang ada supaya
+    user tidak kena login ulang terus-menerus, dan karena umurnya panjang
+    token itu harus bisa dicabut: itulah gunanya baris RefreshToken.
+    """
+    access = create_access_token(
         identity=str(user.id), additional_claims={'role': user.role}
     )
-    return jsonify({'token': token, 'user': user.to_dict()}), 200
+    refresh = create_refresh_token(identity=str(user.id))
+
+    jti = decode_token(refresh)['jti']
+    db.session.add(
+        RefreshToken(
+            jti=jti,
+            user_id=user.id,
+            expires_at=utcnow() + current_app.config['JWT_REFRESH_TOKEN_EXPIRES'],
+            user_agent=(request.headers.get('User-Agent') or '')[:200] or None,
+            ip_address=request.headers.get(
+                'X-Forwarded-For', request.remote_addr
+            ),
+        )
+    )
+    db.session.commit()
+    return access, refresh
+
+
+@auth_bp.route('/refresh', methods=['POST'])
+@jwt_required(refresh=True)
+@limiter.limit('30 per minute')
+def refresh():
+    """Tukar refresh token jadi access token baru, lalu rotasi.
+
+    Rotasi berarti setiap refresh token hanya bisa dipakai sekali: begitu
+    dipakai, token itu langsung dicabut dan digantikan yang baru. Jadi kalau
+    ada yang mencuri refresh token, orang itu akan menang balapan dengan
+    pemilik aslinya hanya sekali saja.
+
+    Kalau yang datang adalah token yang sudah dicabut, itu berarti ada dua
+    orang memakai token yang sama: pemilik aslinya dan pencuri. Kita tidak
+    tahu siapa yang mana, jadi seluruh sesi milik user itu dicabut. Satu
+    orang yang log out paksa bisa mengakhiri semua sesinya, dan itu harga
+    yang jauh lebih murah daripada membiarkan pencuri tetap masuk.
+    """
+    jti = get_jwt()['jti']
+    record = db.session.get(RefreshToken, jti)
+
+    if record is None:
+        # Token-nya valid secara kriptografi tapi tidak ada di database.
+        # Aplikasi ini selalu membuat baris saat menerbitkan token, jadi
+        # ini berarti barisnya hilang. Tolak.
+        return error('Refresh token tidak dikenal', code=401)
+
+    if record.revoked_at is not None:
+        # Dipakai ulang. Tandai, lalu cabut semua sesi user ini.
+        record.reuse_detected_at = utcnow()
+        user = db.session.get(User, record.user_id)
+        _revoke_all_for_user(record.user_id, reason='reuse_detected')
+        log(
+            'token_reuse_detected', 'refresh_token', None, user,
+            detail=f'jti={jti} reason={record.revoked_reason}',
+        )
+        return error(
+            'Refresh token sudah dipakai. Semua sesi dicabut, silakan login lagi.',
+            code=401,
+        )
+
+    if record.is_expired:
+        # Expired. Dicabut supaya tidak perlu dibersihkan manual nanti.
+        record.revoked_at = utcnow()
+        record.revoked_reason = 'expired'
+        db.session.commit()
+        return error('Refresh token kedaluwarsa, silakan login lagi', code=401)
+
+    user = db.session.get(User, record.user_id)
+    if user is None:
+        return error('User tidak ditemukan', code=401)
+
+    # Issue dulu, baru cabut yang lama dan tautkan jti penggantinya.
+    # Urutan ini penting: kalau issue gagal, token lama masih berlaku
+    # dan user bisa mencoba lagi. Kalau dibalik, satu kegagalan
+    # refresh akan mengakhiri sesi.
+    access, baru = _issue_tokens(user)
+    jti_baru = decode_token(baru)['jti']
+
+    record.revoked_at = utcnow()
+    record.revoked_reason = 'rotated'
+    record.replaced_by = jti_baru
+    db.session.commit()
+
+    return jsonify(
+        {'token': access, 'refresh_token': baru, 'user': user.to_dict()}
+    ), 200
+
+
+def _revoke_all_for_user(user_id, reason):
+    """Cabut semua refresh token milik satu user."""
+    now = utcnow()
+    aktif = RefreshToken.query.filter(
+        RefreshToken.user_id == user_id,
+        RefreshToken.revoked_at.is_(None),
+    ).all()
+    for row in aktif:
+        row.revoked_at = now
+        row.revoked_reason = reason
+    db.session.commit()
+    return len(aktif)
 
 
 @auth_bp.route('/me', methods=['GET'])
@@ -170,14 +284,109 @@ def current_user():
 
 
 @auth_bp.route('/logout', methods=['POST'])
-@jwt_required()
+@jwt_required(optional=True)
 def logout():
-    """Catat waktu logout.
+    """Cabut sesi ini, dan cabut semua sesi kalau diminta.
 
-    JWT yang sudah terbit tetap valid sampai kedaluwarsa, jadi logout
-    di sisi server tidak bisa mencabut token yang sudah keluar.
-    Cara yang benar di production adalah menyimpan daftar token yang
-    dicabut (token denylist) atau memakai access token berumur pendek.
-    Catatan ini sengaja ditulis supaya tidak menyesatkan.
+    Access token yang sudah terbit tidak bisa dicabut dari sisi server:
+    JWT sudah ditandatangani, tidak ada yang perlu ditanyakan ke
+    database. Jadi logout tidak bisa mencabut access token yang
+    sudah keluar dari browser, dan itu memang sifat JWT yang jujur
+    harus diakui. Yang dicabut di sini adalah refresh token: tanpa itu,
+    sesi yang 'sudah logout' masih bisa diperpanjang diam-diam,
+    dan itu yang membuat logout terasa tidak berfungsi.
+
+    Karena itu access token dibuat berumur pendek. periodenya yang
+    memperkecil jeda antara logout dan benar-benar tidak berlaku.
+
+    Kirim refresh_token di body agar sesi ini saja yang ditutup. Kirim
+    all_sessions=true untuk menutup semua sesi, misalnya setelah
+    password diubah atau dicurigai kompromi.
     """
+    data = body()
+    user = current_user()
+    if user is None:
+        # Tidak ada token sama sekali, jadi tidak ada sesi yang bisa
+        # dicabut. Tidak apa-apa, logout harus idempoten: dipanggil
+        # dua kali tetap dianggap berhasil.
+        return jsonify({'message': 'Logged out'}), 200
+
+    if data.get('all_sessions'):
+        jumlah = _revoke_all_for_user(user.id, reason='logout_all')
+        detail = f'{jumlah} sesi dicabut'
+    else:
+        jumlah = _revoke_from_body(data.get('refresh_token'), user)
+        detail = f'sesi dicabut: {jumlah}'
+
+    log('logout', 'session', None, user, detail=detail)
     return jsonify({'message': 'Logged out'}), 200
+
+
+def _revoke_from_body(raw_token, user):
+    """Cabut satu sesi berdasarkan refresh token di body request.
+
+    jti milik access token dan jti milik refresh token itu dua hal
+    berbeda, jadi jti access token tidak akan pernah ditemukan di tabel
+    refresh_tokens. Karena itu refresh token di body harus dibaca dulu
+    untuk diambil jti-nya.
+    """
+    if not raw_token:
+        return 0
+
+    try:
+        claims = decode_token(raw_token)
+    except Exception:
+        # Token rusak atau kedaluwarsa. Tidak ada yang bisa dicabut,
+        # dan bukan alasan membalas error: pemanggil tetap sedang
+        # keluar, hasilnya sama saja.
+        return 0
+
+    # Cuma refresh token yang relevan, dan cuma miliknya sendiri.
+    # Tanpa ini, siapa pun yang punya access token milik user bisa
+    # mencabut sesi orang lain yang juga miliknya.
+    if claims.get('type') != 'refresh':
+        return 0
+    if claims.get('sub') != str(user.id):
+        return 0
+
+    record = db.session.get(RefreshToken, claims.get('jti'))
+    if record is None or record.revoked_at is not None:
+        return 0
+
+    record.revoked_at = utcnow()
+    record.revoked_reason = 'logout'
+    db.session.commit()
+    return 1
+
+
+@auth_bp.route('/sessions', methods=['GET'])
+@jwt_required()
+def list_sessions():
+    """Sesi aktif milik user yang sedang login.
+
+    Membantu user melihat perangkat mana yang masih masuk, dan memberi
+    angka yang bisa dipakai frontend untuk menampilkan 'sesi lain'.
+    """
+    user_id = current_user().id
+    rows = (
+        RefreshToken.query.filter(
+            RefreshToken.user_id == user_id,
+            RefreshToken.revoked_at.is_(None),
+            RefreshToken.expires_at > utcnow(),
+        )
+        .order_by(RefreshToken.created_at.desc())
+        .all()
+    )
+    return jsonify({
+        'sessions': [
+            {
+                'jti': row.jti,
+                'created_at': row.created_at.isoformat() if row.created_at else None,
+                'expires_at': row.expires_at.isoformat() if row.expires_at else None,
+                'user_agent': row.user_agent or '',
+                'ip_address': row.ip_address or '',
+            }
+            for row in rows
+        ],
+        'total': len(rows),
+    }), 200

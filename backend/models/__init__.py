@@ -263,3 +263,65 @@ class AuditLog(db.Model):
             'ip_address': self.ip_address,
             'created_at': self.created_at.isoformat() if self.created_at else None,
         }
+
+
+class RefreshToken(db.Model):
+    """Satu sesi login yang sedang berjalan.
+
+    Access token sengaja dibuat berumur pendek supaya kebocorannya
+    cepat jadi tidak berlaku. Supaya user tidak terus-terusan kena
+    login ulang, ada refresh token yang berumur panjang. Dan karena
+    refresh token itu berumur panjang, tokennya harus bisa dicabut:
+    inilah yang membuat logout berfungsi sungguhan.
+
+    Baris di sini adalah daftar sesi yang masih berlaku. Yang dicabut
+    tidak dihapus, tapi ditandai, supaya jejaknya masih ada dan
+    tidak bisa dimanipulasi dari sisi aplikasi.
+    """
+
+    __tablename__ = 'refresh_tokens'
+
+    # Satu baris per token. Baris ini dihapus saat logout atau saat
+    # tokennya kedaluwarsa sendiri, supaya tabel tidak tumbuh tanpa batas.
+    __table_args__ = (
+        db.Index('ix_refresh_tokens_user_active', 'user_id', 'revoked_at'),
+    )
+
+    # jti adalah ID unik yang ditaruh di dalam JWT. Database menyimpan
+    # penanda token, bukan tokennya sendiri: kalau baris ini bocor,
+    # itu tidak langsung berarti bisa dipakai login.
+    jti = db.Column(db.String(36), primary_key=True)
+    user_id = db.Column(
+        db.Integer, db.ForeignKey('users.id'), nullable=False, index=True
+    )
+    created_at = db.Column(db.DateTime, default=utcnow, nullable=False)
+    expires_at = db.Column(db.DateTime, nullable=False, index=True)
+
+    # Diisi saat logout, atau saat rotasi menggantikan token ini.
+    revoked_at = db.Column(db.DateTime)
+    # Alasan pencabutan, supaya bug dan pencurian bisa dibedakan saat
+    # membaca log: 'logout', 'rotated', 'reuse_detected'.
+    revoked_reason = db.Column(db.String(30))
+
+    # jti pengganti, diisi saat rotasi. Rantai ini yang membuat jejak
+    # tetap bisa ditelusuri: dari token terbaru bisa dikejar ke
+    # token sebelumnya, bukan hanya melihat "sudah dicabut".
+    replaced_by = db.Column(db.String(36))
+    # Percobaan memakai token yang sudah dicabut. Nullable karena
+    # normalnya tidak ada nilainya; kalau terisi, ini tanda token-nya
+    # bocor dan dipakai dua orang.
+    reuse_detected_at = db.Column(db.DateTime)
+
+    user_agent = db.Column(db.String(200))
+    ip_address = db.Column(db.String(45))
+
+    @property
+    def is_active(self):
+        """Masih bisa dipakai, atau tidak."""
+        if self.revoked_at is not None:
+            return False
+        return self.expires_at > utcnow()
+
+    @property
+    def is_expired(self):
+        return self.expires_at <= utcnow()

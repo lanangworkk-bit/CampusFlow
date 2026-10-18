@@ -81,10 +81,20 @@ class Config:
     SQLALCHEMY_TRACK_MODIFICATIONS = False
 
     JWT_SECRET_KEY = os.environ.get('JWT_SECRET_KEY', SECRET_KEY)
-    JWT_ACCESS_TOKEN_EXPIRES = timedelta(
-        hours=int(os.environ.get('JWT_EXPIRES_HOURS', '12'))
-    )
     JWT_ERROR_MESSAGE_KEY = 'error'
+
+    # Access token berumur pendek, beberapa menit saja, supaya kalau
+    # bocor dampaknya kecil. Yang hilang cuma beberapa menit akses, dan
+    # transparan berikutnya memperbaikinya tanpa perlu login ulang.
+    JWT_ACCESS_TOKEN_EXPIRES = timedelta(
+        minutes=int(os.environ.get('JWT_EXPIRES_MINUTES', '30'))
+    )
+    # Refresh token berumur panjang supaya user tidak sering kena login
+    # ulang. Karena umurnya panjang, token ini yang bisa dicabut: itu yang
+    # membuat logout benar-benar berfungsi.
+    JWT_REFRESH_TOKEN_EXPIRES = timedelta(
+        days=int(os.environ.get('JWT_REFRESH_EXPIRES_DAYS', '14'))
+    )
 
     # Dipakai endpoint /api/metrics yang bersifat sistem, bukan data user.
     ADMIN_API_KEY = os.environ.get('ADMIN_API_KEY', '')
