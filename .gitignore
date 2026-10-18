@@ -41,3 +41,7 @@ Thumbs.db
 
 # Alembic
 migrations/*/__pycache__/
+
+# Vercel: tautan proyek dan hasil build, dibuat ulang tiap deploy
+.vercel/
+public/

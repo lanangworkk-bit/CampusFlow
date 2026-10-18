@@ -1,0 +1,10 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "sh vercel-build.sh",
+  "functions": {
+    "wsgi.py": {
+      "maxDuration": 60,
+      "includeFiles": "templates/**"
+    }
+  }
+}

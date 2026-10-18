@@ -52,6 +52,21 @@ def _absolute_sqlite_url(url):
     return f'{prefix}{os.path.join(INSTANCE_DIR, rest)}'
 
 
+def _normalize_postgres_url(url):
+    """Samakan bentuk URL PostgreSQL dari penyedia mana pun.
+
+    Neon, Supabase, dan sebagian penyedia lain mengirim 'postgres://'
+    atau 'postgresql://'. Kedua bentuk itu membuat SQLAlchemy memilih
+    driver default psycopg2, yang tidak dipasang di proyek ini; yang
+    ada psycopg versi 3. Menyisipkan '+psycopg' membuat driver-nya
+    cocok tanpa harus mengubah nilai dari penyedia.
+    """
+    for prefix in ('postgres://', 'postgresql://'):
+        if url.startswith(prefix):
+            return 'postgresql+psycopg://' + url[len(prefix):]
+    return url
+
+
 def _database_url():
     """Pilih database dari environment, default ke SQLite.
 
@@ -63,7 +78,7 @@ def _database_url():
     """
     url = os.environ.get('DATABASE_URL')
     if url:
-        return _absolute_sqlite_url(url)
+        return _absolute_sqlite_url(_normalize_postgres_url(url))
 
     # Default development: file SQLite di folder database/.
     # Path absolut dipakai supaya tidak salah relatif terhadap folder
@@ -133,6 +148,27 @@ class TestingConfig(Config):
 
 class ProductionConfig(Config):
     DEBUG = False
+
+    # Koneksi database di produksi jarang idle lama, jadi pre_ping
+    # dipakai: sebelum dipakai, koneksi dicek dulu dan yang sudah mati
+    # diganti, bukan diserahkan ke request lalu gagal.
+    SQLALCHEMY_ENGINE_OPTIONS = {
+        'pool_pre_ping': True,
+        'pool_recycle': 280,
+    }
+
+    if os.environ.get('VERCEL'):
+        # Di serverless, tiap invocation bisa jalan di instance yang
+        # berbeda. Pool koneksi yang menggantung antar-permintaan tidak
+        # ada gunanya dan cuma memakan slot koneksi Neon. NullPool
+        # menutup koneksi begitu selesai dipakai; Neon sendiri sudah
+        # punya pooling di endpoint '-pooler'.
+        from sqlalchemy.pool import NullPool
+
+        SQLALCHEMY_ENGINE_OPTIONS = {
+            'pool_pre_ping': True,
+            'poolclass': NullPool,
+        }
 
     # Produksi TIDAK membuat tabel otomatis. Skema harus dibangun lewat
     # `flask --app backend.app db upgrade` supaya ada riwayat migration
